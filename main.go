@@ -10,7 +10,6 @@ import (
 )
 
 func main() {
-	// Загрузка .env
 	err := godotenv.Load()
 	if err != nil {
 		log.Printf("Warning: Failed to load .env file: %v", err)
@@ -23,9 +22,11 @@ func main() {
 	adminFilePath := "admins.json"
 	redisAddr := "localhost:6379"
 
-	// Проверка токена
 	if token == "" {
 		log.Fatal("DISCORD_TOKEN is not set")
+	}
+	if telegramToken == "" {
+		log.Fatal("TELEGRAM_TOKEN is not set")
 	}
 
 	rank, err := ranking.NewRanking(adminFilePath, redisAddr)

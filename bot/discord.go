@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"csv2/handlers"
 	"csv2/ranking"
@@ -23,9 +24,19 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 		handlers.HandleMessageCreate(s, m, rank, floodChannelID, relayChannelID)
 	})
 
-	if err := dg.Open(); err != nil {
-		log.Fatalf("Failed to open Discord session: %v", err)
+	// Повторные попытки подключения
+	for i := 0; i < 5; i++ {
+		err = dg.Open()
+		if err == nil {
+			break
+		}
+		log.Printf("Failed to open Discord session (attempt %d/5): %v", i+1, err)
+		time.Sleep(5 * time.Second) // Ждём 5 секунд перед следующей попыткой
 	}
+	if err != nil {
+		log.Fatalf("Failed to open Discord session after 5 attempts: %v", err)
+	}
+
 	log.Println("Discord bot is running.")
 	return dg
 }
