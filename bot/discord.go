@@ -26,7 +26,13 @@ func setupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 
 		if m.ChannelID == floodChannelID && strings.HasPrefix(m.Content, "!") {
 			log.Printf("Received command: %s from %s in flood channel", m.Content, m.Author.Username)
-			handleCommands(s, m, rank)
+			if strings.HasPrefix(m.Content, "!dep") {
+				rank.HandleDepCommand(s, m, m.Content)
+			} else if strings.HasPrefix(m.Content, "!china adm") {
+				rank.HandleChinaCommandAdmin(s, m, m.Content)
+			} else {
+				handleCommands(s, m, rank)
+			}
 			return
 		}
 
@@ -51,28 +57,55 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	if m.Content == "!top5" {
 		topUsers := rank.GetTop5()
 		if len(topUsers) == 0 {
-			s.ChannelMessageSend(m.ChannelID, "Демография владельцев Социальных Кредитов пока пуста.")
+			if _, err := s.ChannelMessageSend(m.ChannelID, "Демография владельцев Социальных Кредитов пока пуста."); err != nil {
+				log.Printf("Failed to send top5 empty response: %v", err)
+			}
 			return
 		}
 		response := "Топ-5 жителей Китая:\n"
 		for i, user := range topUsers {
 			response += fmt.Sprintf("%d. <@%s> - %d очков\n", i+1, user.ID, user.Rating)
 		}
-		s.ChannelMessageSend(m.ChannelID, response)
+		if _, err := s.ChannelMessageSend(m.ChannelID, response); err != nil {
+			log.Printf("Failed to send top5 response: %v", err)
+		}
+		log.Printf("Sent top5 response for %s", m.Author.ID)
 		return
 	}
 
 	if strings.HasPrefix(m.Content, "!rating") {
 		parts := strings.Fields(m.Content)
 		if len(parts) < 2 {
-			s.ChannelMessageSend(m.ChannelID, "❌ Глупый Китайский житель! Вводи данные из привелегии правильно! Пример: !rating @username")
+			if _, err := s.ChannelMessageSend(m.ChannelID, "❌ Глупый Китайский житель! Вводи данные из привилегии правильно! Пример: !rating @username"); err != nil {
+				log.Printf("Failed to send rating usage response: %v", err)
+			}
 			return
 		}
 		userID := strings.TrimPrefix(parts[1], "<@")
 		userID = strings.TrimSuffix(userID, ">")
 		userID = strings.TrimPrefix(userID, "!")
 		rating := rank.GetRating(userID)
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Социальные кредиты жителя Китая <@%s>: %d баллов", userID, rating))
+		if _, err := s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Социальные кредиты жителя Китая <@%s>: %d баллов", userID, rating)); err != nil {
+			log.Printf("Failed to send rating response for %s: %v", userID, err)
+		}
+		log.Printf("Sent rating response for %s: %d", userID, rating)
+		return
+	}
+
+	if m.Content == "!help" {
+		response := "📜 **Список команд бота:**\n" +
+			"**!china @id +X [причина]** - Передать X кредитов пользователю со своего баланса.\n" +
+			"**!china adm @id +X [причина]** - (Админ) Выдать X кредитов пользователю.\n" +
+			"**!dep poll \"Тема\" \"Вариант1\" \"Вариант2\"** - (Админ) Создать опрос для ставок.\n" +
+			"**!dep <сумма> <вариант>** - Сделать ставку на вариант опроса.\n" +
+			"**!dep depres \"вариант\"** - (Админ) Завершить опрос и распределить выигрыш.\n" +
+			"**!top5** - Показать топ-5 пользователей по кредитам.\n" +
+			"**!rating @id** - Узнать баланс пользователя.\n" +
+			"**!help** - Показать это сообщение."
+		if _, err := s.ChannelMessageSend(m.ChannelID, response); err != nil {
+			log.Printf("Failed to send help response: %v", err)
+		}
+		log.Printf("Sent help response for %s", m.Author.ID)
 		return
 	}
 }
@@ -85,15 +118,17 @@ func SendFileToDiscord(dg *discordgo.Session, channelID, filePath, caption strin
 	defer file.Close()
 
 	if caption != "" {
-		_, err = dg.ChannelMessageSend(channelID, caption)
-		if err != nil {
+		if _, err := dg.ChannelMessageSend(channelID, caption); err != nil {
+			log.Printf("Failed to send caption to Discord: %v", err)
 			return fmt.Errorf("Failed to send message to Discord: %v", err)
 		}
 	}
 
 	_, err = dg.ChannelFileSend(channelID, filePath, file)
 	if err != nil {
+		log.Printf("Failed to send file to Discord: %v", err)
 		return fmt.Errorf("Failed to send file to Discord: %v", err)
 	}
+	log.Printf("Sent file to Discord channel %s: %s", channelID, filePath)
 	return nil
 }
