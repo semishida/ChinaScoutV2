@@ -14,7 +14,7 @@ import (
 )
 
 func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayChannelID string, rank *ranking.Ranking) {
-	dg := setupDiscord(discordToken, floodChannelID, relayChannelID, rank)
+	dg := SetupDiscord(discordToken, floodChannelID, relayChannelID, rank)
 	defer dg.Close()
 
 	tgBot, chatID := setupTelegram(telegramToken, telegramChatID)
