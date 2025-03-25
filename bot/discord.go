@@ -3,8 +3,9 @@ package bot
 import (
 	"fmt"
 	"log"
-	"strings"
+	"os"
 
+	"csv2/handlers"
 	"csv2/ranking"
 	"github.com/bwmarrin/discordgo"
 )
@@ -19,45 +20,7 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 	rank.TrackVoiceActivity(dg)
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		if m.Author.ID == s.State.User.ID {
-			return
-		}
-
-		if m.ChannelID == floodChannelID && strings.HasPrefix(m.Content, "!") {
-			log.Printf("Received command: %s from %s in flood channel", m.Content, m.Author.ID)
-			switch {
-			case strings.HasPrefix(m.Content, "!poll #"):
-				rank.HandlePollClose(s, m, m.Content)
-			case strings.HasPrefix(m.Content, "!poll"):
-				rank.HandlePollCommand(s, m, m.Content)
-			case strings.HasPrefix(m.Content, "!dep"):
-				rank.HandleDepCommand(s, m, m.Content)
-			case strings.HasPrefix(m.Content, "!admin"):
-				rank.HandleAdminCommand(s, m, m.Content)
-			case strings.HasPrefix(m.Content, "!china give"):
-				rank.HandleChinaGive(s, m, m.Content)
-			case strings.HasPrefix(m.Content, "!china rating"):
-				rank.HandleChinaRating(s, m, m.Content)
-			case strings.HasPrefix(m.Content, "!china help"):
-				rank.HandleChinaHelp(s, m, m.Content)
-			case m.Content == "!top5":
-				topUsers := rank.GetTop5()
-				if len(topUsers) == 0 {
-					s.ChannelMessageSend(m.ChannelID, "🏆 Топ-5 пуст!")
-					return
-				}
-				response := "🏆 **Топ-5 игроков:**\n"
-				for i, user := range topUsers {
-					response += fmt.Sprintf("%d. <@%s> - %d кредитов\n", i+1, user.ID, user.Rating)
-				}
-				s.ChannelMessageSend(m.ChannelID, response)
-			}
-			return
-		}
-
-		if m.ChannelID == relayChannelID {
-			log.Printf("Received message in relay: %s from %s", m.Content, m.Author.ID)
-		}
+		handlers.HandleMessageCreate(s, m, rank, floodChannelID, relayChannelID)
 	})
 
 	if err := dg.Open(); err != nil {
@@ -65,4 +28,27 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 	}
 	log.Println("Discord bot is running.")
 	return dg
+}
+
+func SendFileToDiscord(dg *discordgo.Session, channelID, filePath, caption string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %v", err)
+	}
+	defer file.Close()
+
+	if caption != "" {
+		if _, err := dg.ChannelMessageSend(channelID, caption); err != nil {
+			log.Printf("Failed to send caption to Discord: %v", err)
+			return fmt.Errorf("failed to send message to Discord: %v", err)
+		}
+	}
+
+	_, err = dg.ChannelFileSend(channelID, filePath, file)
+	if err != nil {
+		log.Printf("Failed to send file to Discord: %v", err)
+		return fmt.Errorf("failed to send file to Discord: %v", err)
+	}
+	log.Printf("Sent file to Discord channel %s: %s", channelID, filePath)
+	return nil
 }

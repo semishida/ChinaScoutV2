@@ -179,7 +179,9 @@ func (r *Ranking) GetTop5() []User {
 func (r *Ranking) IsAdmin(userID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.admins[userID]
+	isAdmin := r.admins[userID]
+	log.Printf("Checking if %s is admin: %v", userID, isAdmin)
+	return isAdmin
 }
 
 // !poll "Вопрос" "Вариант1" "Вариант2" ...
@@ -194,7 +196,6 @@ func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCr
 
 	if !r.IsAdmin(m.Author.ID) {
 		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут создавать опросы!")
-		log.Printf("User %s is not an admin", m.Author.ID)
 		return
 	}
 
@@ -222,7 +223,7 @@ func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCr
 	for i, opt := range options {
 		response += fmt.Sprintf("%d. %s\n", i+1, opt)
 	}
-	response += "Ставьте: `!dep <номер_варианта> <сумма>`"
+	response += "Ставьте: `!dep <номер_варианта> <сумма>`\nЗакрытие: `!poll #%d close <номер>`"
 	s.ChannelMessageSend(m.ChannelID, response)
 	log.Printf("Poll #%d created by %s: %s with options %v", pollID, m.Author.ID, question, options)
 }
