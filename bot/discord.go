@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"csv2/handlers"
 	"csv2/ranking"
 	"github.com/bwmarrin/discordgo"
 )
@@ -20,18 +19,13 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 	dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentMessageContent | discordgo.IntentsGuildVoiceStates
 	rank.TrackVoiceActivity(dg)
 
-	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		handlers.HandleMessageCreate(s, m, rank, floodChannelID, relayChannelID)
-	})
-
-	// Повторные попытки подключения
 	for i := 0; i < 5; i++ {
 		err = dg.Open()
 		if err == nil {
 			break
 		}
 		log.Printf("Failed to open Discord session (attempt %d/5): %v", i+1, err)
-		time.Sleep(5 * time.Second) // Ждём 5 секунд перед следующей попыткой
+		time.Sleep(5 * time.Second)
 	}
 	if err != nil {
 		log.Fatalf("Failed to open Discord session after 5 attempts: %v", err)

@@ -50,7 +50,6 @@ func NewRanking(adminFilePath, redisAddr string) (*Ranking, error) {
 		ctx:      context.Background(),
 	}
 
-	// Инициализация Redis
 	r.redis = redis.NewClient(&redis.Options{
 		Addr: redisAddr,
 	})
@@ -58,7 +57,6 @@ func NewRanking(adminFilePath, redisAddr string) (*Ranking, error) {
 		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
 	}
 
-	// Загрузка админов
 	file, err := os.Open(adminFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open admin file: %v", err)
@@ -146,7 +144,7 @@ func (r *Ranking) GetTop5() []User {
 			log.Printf("Failed to unmarshal user %s: %v", key, err)
 			continue
 		}
-		if user.Rating > 0 { // Учитываем только пользователей с рейтингом > 0
+		if user.Rating > 0 {
 			users = append(users, user)
 		}
 	}
@@ -170,7 +168,6 @@ func (r *Ranking) IsAdmin(userID string) bool {
 	return isAdmin
 }
 
-// Генерация случайного 5-символьного ID для опроса
 func generatePollID() string {
 	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	rand.Seed(time.Now().UnixNano())
@@ -181,7 +178,6 @@ func generatePollID() string {
 	return string(id)
 }
 
-// !cpoll Вопрос [Вариант1] [Вариант2] ...
 func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Processing !cpoll: %s from %s", command, m.Author.ID)
 
@@ -192,11 +188,10 @@ func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCr
 	}
 
 	if !r.IsAdmin(m.Author.ID) {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только товарищи-админы могут создавать опросы! Повышай свой социальный рейтинг, чтобы заслужить доверие партии!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Только товарищи-админы могут создавать опросы!")
 		return
 	}
 
-	// Вопрос — всё до первого варианта в квадратных скобках
 	var questionParts []string
 	var options []string
 	for _, part := range parts[1:] {
@@ -211,12 +206,12 @@ func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCr
 	}
 	question := strings.Join(questionParts, " ")
 	if question == "" {
-		s.ChannelMessageSend(m.ChannelID, "❌ Вопрос не может быть пустым, товарищ! Партия требует ясности!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Вопрос не может быть пустым!")
 		return
 	}
 
 	if len(options) < 2 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Нужно минимум 2 варианта ответа, товарищ! Партия не одобряет лени!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Нужно минимум 2 варианта ответа!")
 		return
 	}
 
@@ -234,16 +229,15 @@ func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCr
 	}
 	r.mu.Unlock()
 
-	response := fmt.Sprintf("🎉 Опрос %s запущен! Товарищ <@%s> внёс вклад в социальный рейтинг, создав опрос: %s\nДепайте скорее!!!\nВарианты для голосования, одобренные партией:\n", pollID, m.Author.ID, question)
+	response := fmt.Sprintf("🎉 Опрос %s запущен! <@%s> создал опрос: %s\nВарианты:\n", pollID, m.Author.ID, question)
 	for i, opt := range options {
-		response += fmt.Sprintf("%d. [%s]\n", i+1, opt) // Варианты в квадратных скобках
+		response += fmt.Sprintf("%d. [%s]\n", i+1, opt)
 	}
-	response += fmt.Sprintf("Ставьте, товарищи: `!dep %s <номер_варианта> <сумма>`\nЗакрытие по указанию партии: `!closedep %s <номер>`", pollID, pollID)
+	response += fmt.Sprintf("Ставьте: `!dep %s <номер_варианта> <сумма>`\nЗакрытие: `!closedep %s <номер>`", pollID, pollID)
 	s.ChannelMessageSend(m.ChannelID, response)
 	log.Printf("Poll %s created by %s: %s with options %v", pollID, m.Author.ID, question, options)
 }
 
-// !dep <poll_id> <option_number> <amount>
 func (r *Ranking) HandleDepCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Processing !dep: %s from %s", command, m.Author.ID)
 
@@ -256,33 +250,33 @@ func (r *Ranking) HandleDepCommand(s *discordgo.Session, m *discordgo.MessageCre
 	pollID := parts[1]
 	option, err := strconv.Atoi(parts[2])
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "❌ Номер варианта должен быть числом, товарищ! Партия требует точности!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Номер варианта должен быть числом!")
 		return
 	}
 
 	amount, err := strconv.Atoi(parts[3])
 	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом, товарищ! Не пытайся обмануть партию!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом!")
 		return
 	}
 
 	r.mu.Lock()
 	poll, exists := r.polls[pollID]
 	if !exists || !poll.Active {
-		s.ChannelMessageSend(m.ChannelID, "❌ Опрос не найден или уже закрыт, товарищ! Партия не одобряет твою невнимательность!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Опрос не найден или уже закрыт!")
 		r.mu.Unlock()
 		return
 	}
 
 	if option < 1 || option > len(poll.Options) {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Номер варианта должен быть от 1 до %d, товарищ! Следуй указаниям партии!", len(poll.Options)))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Номер варианта должен быть от 1 до %d!", len(poll.Options)))
 		r.mu.Unlock()
 		return
 	}
 
 	userRating := r.GetRating(m.Author.ID)
 	if userRating < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Недостаточно социальных кредитов, товарищ! Твой баланс: %d. Работай усерднее для партии!", userRating))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d", userRating))
 		r.mu.Unlock()
 		return
 	}
@@ -292,11 +286,10 @@ func (r *Ranking) HandleDepCommand(s *discordgo.Session, m *discordgo.MessageCre
 	poll.Choices[m.Author.ID] = option
 	r.mu.Unlock()
 
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("🎲 <@%s> поставил %d социальных кредитов на [%s] в опросе %s", m.Author.ID, amount, poll.Options[option-1], poll.Question))
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("🎲 <@%s> поставил %d кредитов на [%s] в опросе %s", m.Author.ID, amount, poll.Options[option-1], poll.Question))
 	log.Printf("User %s bet %d on option %d in poll %s", m.Author.ID, amount, option, pollID)
 }
 
-// !closedep <poll_id> <winning_option>
 func (r *Ranking) HandleCloseDepCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Processing !closedep: %s from %s", command, m.Author.ID)
 
@@ -307,35 +300,34 @@ func (r *Ranking) HandleCloseDepCommand(s *discordgo.Session, m *discordgo.Messa
 	}
 
 	pollID := parts[1]
-	// Убираем угловые скобки или квадратные скобки, если они есть
 	winningOptionStr := strings.Trim(parts[2], "<>[]")
 	winningOption, err := strconv.Atoi(winningOptionStr)
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "❌ Номер варианта должен быть числом, товарищ! Партия требует точности!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Номер варианта должен быть числом!")
 		return
 	}
 
 	r.mu.Lock()
 	poll, exists := r.polls[pollID]
 	if !exists {
-		s.ChannelMessageSend(m.ChannelID, "❌ Опрос не найден, товарищ! Партия не одобряет твою невнимательность!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Опрос не найден!")
 		r.mu.Unlock()
 		return
 	}
 	if !poll.Active {
-		s.ChannelMessageSend(m.ChannelID, "❌ Опрос уже закрыт, товарищ! Партия не одобряет твою невнимательность!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Опрос уже закрыт!")
 		r.mu.Unlock()
 		return
 	}
 
 	if m.Author.ID != poll.Creator {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только создатель опроса может его закрыть, товарищ! Партия не одобряет самодеятельность!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Только создатель опроса может его закрыть!")
 		r.mu.Unlock()
 		return
 	}
 
 	if winningOption < 1 || winningOption > len(poll.Options) {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Номер варианта должен быть от 1 до %d, товарищ! Следуй указаниям партии!", len(poll.Options)))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Номер варианта должен быть от 1 до %d!", len(poll.Options)))
 		r.mu.Unlock()
 		return
 	}
@@ -358,16 +350,16 @@ func (r *Ranking) HandleCloseDepCommand(s *discordgo.Session, m *discordgo.Messa
 		coefficient = float64(totalBet) / float64(winnersBet)
 	}
 
-	response := fmt.Sprintf("✅ Опрос %s завершён по указанию партии! Победил вариант: [%s] (№%d)\nКоэффициент лояльности партии: %.2f\nТоварищи, заслужившие похвалу партии:\n", pollID, poll.Options[winningOption-1], winningOption, coefficient)
+	response := fmt.Sprintf("✅ Опрос %s завершён! Победил: [%s] (№%d)\nКоэффициент: %.2f\nПобедители:\n", pollID, poll.Options[winningOption-1], winningOption, coefficient)
 	for userID, choice := range poll.Choices {
 		if choice == winningOption {
 			winnings := int(float64(poll.Bets[userID]) * coefficient)
-			r.UpdateRating(userID, winnings+poll.Bets[userID]) // Возвращаем ставку + выигрыш
-			response += fmt.Sprintf("<@%s>: %d социальных кредитов (ставка: %d)\n", userID, winnings+poll.Bets[userID], poll.Bets[userID])
+			r.UpdateRating(userID, winnings+poll.Bets[userID])
+			response += fmt.Sprintf("<@%s>: %d кредитов (ставка: %d)\n", userID, winnings+poll.Bets[userID], poll.Bets[userID])
 		}
 	}
 	if winnersBet == 0 {
-		response += "Никто не заслужил похвалы партии! Товарищи, вы разочаровали Великого Лидера!"
+		response += "Никто не победил!"
 	}
 
 	poll.Active = false
@@ -377,7 +369,6 @@ func (r *Ranking) HandleCloseDepCommand(s *discordgo.Session, m *discordgo.Messa
 	log.Printf("Poll %s closed by %s, winner: %s, coefficient: %.2f", pollID, m.Author.ID, poll.Options[winningOption-1], coefficient)
 }
 
-// !china give @id <amount> [reason]
 func (r *Ranking) HandleChinaGive(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Processing !china give: %s from %s", command, m.Author.ID)
 
@@ -393,13 +384,13 @@ func (r *Ranking) HandleChinaGive(s *discordgo.Session, m *discordgo.MessageCrea
 
 	amount, err := strconv.Atoi(parts[3])
 	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом, товарищ! Не пытайся обмануть партию!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом!")
 		return
 	}
 
 	senderRating := r.GetRating(m.Author.ID)
 	if senderRating < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Недостаточно социальных кредитов, товарищ! Твой баланс: %d. Работай усерднее для партии!", senderRating))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d", senderRating))
 		return
 	}
 
@@ -411,15 +402,14 @@ func (r *Ranking) HandleChinaGive(s *discordgo.Session, m *discordgo.MessageCrea
 		reason = strings.Join(parts[4:], " ")
 	}
 
-	response := fmt.Sprintf("✅ Товарищ <@%s> внёс %d социальных кредитов в копилку <@%s>! Партия гордится вашей щедростью!", m.Author.ID, amount, targetID)
+	response := fmt.Sprintf("✅ <@%s> передал %d кредитов <@%s>!", m.Author.ID, amount, targetID)
 	if reason != "" {
 		response += fmt.Sprintf(" | Причина: %s", reason)
 	}
 	s.ChannelMessageSend(m.ChannelID, response)
-	log.Printf("User %s gave %d social credits to %s. Reason: %s", m.Author.ID, amount, targetID, reason)
+	log.Printf("User %s gave %d credits to %s. Reason: %s", m.Author.ID, amount, targetID, reason)
 }
 
-// !china rating @id
 func (r *Ranking) HandleChinaRating(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Processing !china rating: %s from %s", command, m.Author.ID)
 
@@ -434,11 +424,10 @@ func (r *Ranking) HandleChinaRating(s *discordgo.Session, m *discordgo.MessageCr
 	targetID = strings.TrimPrefix(targetID, "!")
 
 	rating := r.GetRating(targetID)
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("💰 Социальный рейтинг гражданина <@%s>: %d социальных кредитов. Партия следит за вами, товарищ!", targetID, rating))
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("💰 Рейтинг <@%s>: %d кредитов", targetID, rating))
 	log.Printf("Rating for %s requested by %s: %d", targetID, m.Author.ID, rating)
 }
 
-// !admin give @id <amount> [reason]
 func (r *Ranking) HandleAdminGive(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Processing !admin give: %s from %s", command, m.Author.ID)
 
@@ -449,7 +438,7 @@ func (r *Ranking) HandleAdminGive(s *discordgo.Session, m *discordgo.MessageCrea
 	}
 
 	if !r.IsAdmin(m.Author.ID) {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только товарищи-админы могут это делать! Повышай свой социальный рейтинг, чтобы заслужить доверие партии!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут это делать!")
 		return
 	}
 
@@ -459,7 +448,7 @@ func (r *Ranking) HandleAdminGive(s *discordgo.Session, m *discordgo.MessageCrea
 
 	amount, err := strconv.Atoi(parts[3])
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть числом, товарищ! Партия требует точности!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть числом!")
 		return
 	}
 
@@ -475,7 +464,7 @@ func (r *Ranking) HandleAdminGive(s *discordgo.Session, m *discordgo.MessageCrea
 		verb = "понизил"
 		amount = -amount
 	}
-	response := fmt.Sprintf("✅ Товарищ-админ <@%s> %s социальный рейтинг <@%s> на %d социальных кредитов! Партия всё видит, товарищ!", m.Author.ID, verb, targetID, amount)
+	response := fmt.Sprintf("✅ Админ <@%s> %s рейтинг <@%s> на %d кредитов!", m.Author.ID, verb, targetID, amount)
 	if reason != "" {
 		response += fmt.Sprintf(" | Причина: %s", reason)
 	}
@@ -483,19 +472,18 @@ func (r *Ranking) HandleAdminGive(s *discordgo.Session, m *discordgo.MessageCrea
 	log.Printf("Admin %s changed rating of %s by %d. Reason: %s", m.Author.ID, targetID, amount, reason)
 }
 
-// !chelp
 func (r *Ranking) HandleHelpCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	log.Printf("Processing !chelp: %s from %s", m.Content, m.Author.ID)
 
-	response := "📜 **Команды бота для повышения социального рейтинга:**\n" +
-		"**!cpoll Вопрос [Вариант1] [Вариант2] ...** - (Админ) Создать опрос для партии\n" +
-		"**!dep <ID_опроса> <номер_варианта> <сумма>** - Поставить социальные кредиты\n" +
-		"**!closedep <ID_опроса> <номер>** - (Админ) Закрыть опрос по указанию партии\n" +
-		"**!china give @id <сумма> [причина]** - Передать социальные кредиты товарищу\n" +
-		"**!china rating @id** - Проверить социальный рейтинг\n" +
-		"**!admin give @id <сумма> [причина]** - (Админ) Выдать/забрать социальные кредиты\n" +
-		"**!chelp** - Показать помощь от партии\n" +
-		"**!top5** - Топ-5 товарищей по социальному рейтингу"
+	response := "📜 **Команды бота:**\n" +
+		"**!cpoll Вопрос [Вариант1] [Вариант2] ...** - (Админ) Создать опрос\n" +
+		"**!dep <ID_опроса> <номер_варианта> <сумма>** - Сделать ставку\n" +
+		"**!closedep <ID_опроса> <номер>** - (Админ) Закрыть опрос\n" +
+		"**!china give @id <сумма> [причина]** - Передать кредиты\n" +
+		"**!china rating @id** - Проверить рейтинг\n" +
+		"**!admin give @id <сумма> [причина]** - (Админ) Выдать/забрать кредиты\n" +
+		"**!chelp** - Показать помощь\n" +
+		"**!top5** - Топ-5 по рейтингу"
 	s.ChannelMessageSend(m.ChannelID, response)
 	log.Printf("Help sent to %s", m.Author.ID)
 }
@@ -572,7 +560,7 @@ func (r *Ranking) TrackVoiceActivity(s *discordgo.Session) {
 					if inChannel {
 						r.UpdateRating(userID, 5)
 						r.voiceAct[userID] = now
-						log.Printf("User %s earned 5 social credits for voice activity", userID)
+						log.Printf("User %s earned 5 credits for voice activity", userID)
 					} else {
 						delete(r.voiceAct, userID)
 					}
