@@ -13,6 +13,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// ////
 func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayChannelID string, rank *ranking.Ranking) {
 	dg := SetupDiscord(discordToken, floodChannelID, relayChannelID, rank)
 	defer dg.Close()
@@ -73,6 +74,23 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 					}
 					os.Remove(filePath)
 				}
+			}
+		}
+	})
+
+	// Обработчик взаимодействий (кнопок)
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if i.Type == discordgo.InteractionMessageComponent {
+			customID := i.MessageComponentData().CustomID
+			switch {
+			case strings.HasPrefix(customID, "blackjack_hit_"):
+				rank.HandleBlackjackHit(s, i)
+			case strings.HasPrefix(customID, "blackjack_stand_"):
+				rank.HandleBlackjackStand(s, i)
+			case strings.HasPrefix(customID, "blackjack_replay_"):
+				rank.HandleBlackjackReplay(s, i)
+			case strings.HasPrefix(customID, "redblack_replay_"):
+				rank.HandleRedBlackReplay(s, i)
 			}
 		}
 	})
@@ -240,13 +258,29 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case command == "!top5":
 		topUsers := rank.GetTop5()
 		if len(topUsers) == 0 {
-			s.ChannelMessageSend(m.ChannelID, "🏆 Топ-5 товарищей пуст! Партия разочарована!")
+			s.ChannelMessageSend(m.ChannelID, "🏆 Топ-5 пуст!")
 			return
 		}
-		response := "🏆 **Топ-5 товарищей по социальному рейтингу:**\n"
+		response := "🏆 **Топ-5 по рейтингу:**\n"
 		for i, user := range topUsers {
-			response += fmt.Sprintf("%d. <@%s> - %d социальных кредитов\n", i+1, user.ID, user.Rating)
+			response += fmt.Sprintf("%d. <@%s> - %d кредитов\n", i+1, user.ID, user.Rating)
 		}
 		s.ChannelMessageSend(m.ChannelID, response)
+	case command == "!polls":
+		rank.HandlePollsCommand(s, m)
+	case command == "!redblack":
+		rank.StartRedBlackGame(s, m)
+	case strings.HasPrefix(command, "!redblack "):
+		rank.HandleRedBlackCommand(s, m, m.Content)
+	case command == "!blackjack":
+		rank.StartBlackjackGame(s, m)
+	case strings.HasPrefix(command, "!blackjack "):
+		rank.HandleBlackjackBet(s, m, m.Content)
+	case strings.HasPrefix(command, "!endblackjack"):
+		rank.HandleEndBlackjackCommand(s, m, m.Content)
+	case command == "!china clear coins":
+		rank.HandleClearCoinsCommand(s, m)
+	case strings.HasPrefix(command, "!china gift all"):
+		rank.HandleGiftAllCommand(s, m, m.Content)
 	}
 }

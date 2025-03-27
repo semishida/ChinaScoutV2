@@ -33,7 +33,7 @@ func main() {
 		log.Fatal("TELEGRAM_CHAT_ID is not set")
 	}
 
-	rank, err := ranking.NewRanking(adminFilePath, redisAddr)
+	rank, err := ranking.NewRanking(adminFilePath, redisAddr, floodChannelID)
 	if err != nil {
 		log.Fatalf("Failed to initialize ranking: %v", err)
 	}
