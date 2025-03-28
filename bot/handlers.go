@@ -13,7 +13,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// ////
+// Start sets up the Discord and Telegram bots and starts the relay system.
 func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayChannelID string, rank *ranking.Ranking) {
 	dg := SetupDiscord(discordToken, floodChannelID, relayChannelID, rank)
 	defer dg.Close()
@@ -82,16 +82,25 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionMessageComponent {
 			customID := i.MessageComponentData().CustomID
+			log.Printf("Interaction received, CustomID: %s, ChannelID: %s, UserID: %s", customID, i.ChannelID, i.Member.User.ID) // Лог для отладки
 			switch {
 			case strings.HasPrefix(customID, "blackjack_hit_"):
+				log.Printf("Matched blackjack_hit_")
 				rank.HandleBlackjackHit(s, i)
 			case strings.HasPrefix(customID, "blackjack_stand_"):
+				log.Printf("Matched blackjack_stand_")
 				rank.HandleBlackjackStand(s, i)
 			case strings.HasPrefix(customID, "blackjack_replay_"):
+				log.Printf("Matched blackjack_replay_")
 				rank.HandleBlackjackReplay(s, i)
-			case strings.HasPrefix(customID, "redblack_replay_"):
-				rank.HandleRedBlackReplay(s, i)
+			case strings.HasPrefix(customID, "rb_replay_"): // Исправлено с "redblack_replay_" на "rb_replay_"
+				log.Printf("Matched rb_replay_, calling HandleRBReplay")
+				rank.HandleRBReplay(s, i)
+			default:
+				log.Printf("No match for CustomID: %s", customID) // Лог для нераспознанных CustomID
 			}
+		} else {
+			log.Printf("Received non-component interaction: %v", i.Type) // Лог для других типов взаимодействий
 		}
 	})
 
@@ -239,23 +248,32 @@ func handleTelegramUpdates(bot *tgbotapi.BotAPI, chatID int64, dg *discordgo.Ses
 }
 
 func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *ranking.Ranking) {
-	command := strings.ToLower(m.Content)
+	command := strings.TrimSpace(strings.ToLower(m.Content)) // Добавляем TrimSpace для удаления пробелов
+	log.Printf("Processing command: %s", command)
 	switch {
 	case strings.HasPrefix(command, "!cpoll"):
+		log.Printf("Matched !cpoll")
 		rank.HandlePollCommand(s, m, m.Content)
 	case strings.HasPrefix(command, "!dep"):
+		log.Printf("Matched !dep")
 		rank.HandleDepCommand(s, m, m.Content)
 	case strings.HasPrefix(command, "!closedep"):
+		log.Printf("Matched !closedep")
 		rank.HandleCloseDepCommand(s, m, m.Content)
 	case strings.HasPrefix(command, "!china give"):
+		log.Printf("Matched !china give")
 		rank.HandleChinaGive(s, m, m.Content)
 	case strings.HasPrefix(command, "!china rating"):
+		log.Printf("Matched !china rating")
 		rank.HandleChinaRating(s, m, m.Content)
 	case strings.HasPrefix(command, "!admin give"):
+		log.Printf("Matched !admin give")
 		rank.HandleAdminGive(s, m, m.Content)
 	case strings.HasPrefix(command, "!chelp"):
+		log.Printf("Matched !chelp")
 		rank.HandleHelpCommand(s, m)
 	case command == "!top5":
+		log.Printf("Matched !top5")
 		topUsers := rank.GetTop5()
 		if len(topUsers) == 0 {
 			s.ChannelMessageSend(m.ChannelID, "🏆 Топ-5 пуст!")
@@ -267,20 +285,30 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 		}
 		s.ChannelMessageSend(m.ChannelID, response)
 	case command == "!polls":
+		log.Printf("Matched !polls")
 		rank.HandlePollsCommand(s, m)
-	case command == "!redblack":
-		rank.StartRedBlackGame(s, m)
-	case strings.HasPrefix(command, "!redblack "):
-		rank.HandleRedBlackCommand(s, m, m.Content)
+	case command == "!rb":
+		log.Printf("Matched !rb, calling StartRBGame")
+		rank.StartRBGame(s, m)
+	case strings.HasPrefix(command, "!rb "):
+		log.Printf("Matched !rb with arguments, calling HandleRBCommand")
+		rank.HandleRBCommand(s, m, m.Content)
 	case command == "!blackjack":
+		log.Printf("Matched !blackjack")
 		rank.StartBlackjackGame(s, m)
 	case strings.HasPrefix(command, "!blackjack "):
+		log.Printf("Matched !blackjack with arguments")
 		rank.HandleBlackjackBet(s, m, m.Content)
 	case strings.HasPrefix(command, "!endblackjack"):
+		log.Printf("Matched !endblackjack")
 		rank.HandleEndBlackjackCommand(s, m, m.Content)
 	case command == "!china clear coins":
+		log.Printf("Matched !china clear coins")
 		rank.HandleClearCoinsCommand(s, m)
 	case strings.HasPrefix(command, "!china gift all"):
+		log.Printf("Matched !china gift all")
 		rank.HandleGiftAllCommand(s, m, m.Content)
+	default:
+		log.Printf("No match for command: %s", command)
 	}
 }

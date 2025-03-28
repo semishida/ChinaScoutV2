@@ -34,11 +34,13 @@ type Poll struct {
 }
 
 type RedBlackGame struct {
+	GameID        string // Уникальный ID игры
 	PlayerID      string
 	Bet           int
-	Choice        string // "red" или "black"
+	Choice        string
 	Active        bool
-	MenuMessageID string // ID сообщения с меню
+	MenuMessageID string // ID начального сообщения
+	Color         int    // Случайный цвет для embed
 }
 
 type Card struct {
@@ -47,14 +49,16 @@ type Card struct {
 }
 
 type BlackjackGame struct {
+	GameID        string // Уникальный ID игры
 	PlayerID      string
 	Bet           int
 	PlayerCards   []Card
 	DealerCards   []Card
 	Active        bool
 	LastActivity  time.Time
-	MenuMessageID string // ID сообщения с меню
-	GameMessageID string // ID сообщения с игрой
+	MenuMessageID string // ID начального сообщения (и единственного, которое редактируем)
+	Color         int    // Случайный цвет для embed
+	ChannelID     string // Канал игры
 }
 
 type Ranking struct {
@@ -198,6 +202,16 @@ func (r *Ranking) IsAdmin(userID string) bool {
 	return isAdmin
 }
 
+func generateGameID(playerID string) string {
+	rand.Seed(time.Now().UnixNano())
+	return fmt.Sprintf("%s_%d_%d", playerID, time.Now().UnixNano(), rand.Intn(10000))
+}
+
+func randomColor() int {
+	// Случайный цвет в формате RGB (0xRRGGBB)
+	return rand.Intn(0xFFFFFF)
+}
+
 func generatePollID() string {
 	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	rand.Seed(time.Now().UnixNano())
@@ -243,7 +257,7 @@ func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCr
 	}
 
 	if !r.IsAdmin(m.Author.ID) {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только товарищи-админы могут создавать опросы!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Только товарищи-админы могут создавать опросы! 🔒")
 		return
 	}
 
@@ -261,12 +275,12 @@ func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCr
 	}
 	question := strings.Join(questionParts, " ")
 	if question == "" {
-		s.ChannelMessageSend(m.ChannelID, "❌ Вопрос не может быть пустым!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Вопрос не может быть пустым! 📝")
 		return
 	}
 
 	if len(options) < 2 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Нужно минимум 2 варианта ответа!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Нужно минимум 2 варианта ответа! 📊")
 		return
 	}
 
@@ -284,11 +298,11 @@ func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCr
 	}
 	r.mu.Unlock()
 
-	response := fmt.Sprintf("🎉 Опрос %s запущен! <@%s> создал опрос: %s\nВарианты:\n", pollID, m.Author.ID, question)
+	response := fmt.Sprintf("🎉 **Опрос %s запущен!**\n<@%s> создал опрос: **%s**\n\n📋 **Варианты:**\n", pollID, m.Author.ID, question)
 	for i, opt := range options {
 		response += fmt.Sprintf("%d. [%s]\n", i+1, opt)
 	}
-	response += fmt.Sprintf("Ставьте: `!dep %s <номер_варианта> <сумма>`\nЗакрытие: `!closedep %s <номер>`", pollID, pollID)
+	response += fmt.Sprintf("\n💸 Ставьте: `!dep %s <номер_варианта> <сумма>`\n🔒 Закрытие: `!closedep %s <номер>`", pollID, pollID)
 	s.ChannelMessageSend(m.ChannelID, response)
 	log.Printf("Poll %s created by %s: %s with options %v", pollID, m.Author.ID, question, options)
 }
@@ -305,33 +319,33 @@ func (r *Ranking) HandleDepCommand(s *discordgo.Session, m *discordgo.MessageCre
 	pollID := parts[1]
 	option, err := strconv.Atoi(parts[2])
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "❌ Номер варианта должен быть числом!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Номер варианта должен быть числом! 🔢")
 		return
 	}
 
 	amount, err := strconv.Atoi(parts[3])
 	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом! 💸")
 		return
 	}
 
 	r.mu.Lock()
 	poll, exists := r.polls[pollID]
 	if !exists || !poll.Active {
-		s.ChannelMessageSend(m.ChannelID, "❌ Опрос не найден или уже закрыт!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Опрос не найден или уже закрыт! 🔒")
 		r.mu.Unlock()
 		return
 	}
 
 	if option < 1 || option > len(poll.Options) {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Номер варианта должен быть от 1 до %d!", len(poll.Options)))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Номер варианта должен быть от 1 до %d! 📊", len(poll.Options)))
 		r.mu.Unlock()
 		return
 	}
 
 	userRating := r.GetRating(m.Author.ID)
 	if userRating < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d", userRating))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d 💰", userRating))
 		r.mu.Unlock()
 		return
 	}
@@ -350,7 +364,7 @@ func (r *Ranking) HandleDepCommand(s *discordgo.Session, m *discordgo.MessageCre
 	coefficients := poll.GetCoefficients()
 	coefficient := coefficients[option-1]
 
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("🎲 <@%s> поставил %d кредитов на [%s] в опросе %s\nТекущий коэффициент: %.2f", m.Author.ID, amount, poll.Options[option-1], poll.Question, coefficient))
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("🎲 <@%s> поставил %d кредитов на [%s] в опросе **%s** 📊\n**📈 Текущий коэффициент:** %.2f", m.Author.ID, amount, poll.Options[option-1], poll.Question, coefficient))
 	log.Printf("User %s bet %d on option %d in poll %s, coefficient: %.2f", m.Author.ID, amount, option, pollID, coefficient)
 }
 
@@ -367,31 +381,31 @@ func (r *Ranking) HandleCloseDepCommand(s *discordgo.Session, m *discordgo.Messa
 	winningOptionStr := strings.Trim(parts[2], "<>[]")
 	winningOption, err := strconv.Atoi(winningOptionStr)
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "❌ Номер варианта должен быть числом!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Номер варианта должен быть числом! 🔢")
 		return
 	}
 
 	r.mu.Lock()
 	poll, exists := r.polls[pollID]
 	if !exists {
-		s.ChannelMessageSend(m.ChannelID, "❌ Опрос не найден!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Опрос не найден! 📊")
 		r.mu.Unlock()
 		return
 	}
 	if !poll.Active {
-		s.ChannelMessageSend(m.ChannelID, "❌ Опрос уже закрыт!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Опрос уже закрыт! 🔒")
 		r.mu.Unlock()
 		return
 	}
 
 	if m.Author.ID != poll.Creator {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только создатель опроса может его закрыть!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Только создатель опроса может его закрыть! 🔐")
 		r.mu.Unlock()
 		return
 	}
 
 	if winningOption < 1 || winningOption > len(poll.Options) {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Номер варианта должен быть от 1 до %d!", len(poll.Options)))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Номер варианта должен быть от 1 до %d! 📊", len(poll.Options)))
 		r.mu.Unlock()
 		return
 	}
@@ -414,16 +428,16 @@ func (r *Ranking) HandleCloseDepCommand(s *discordgo.Session, m *discordgo.Messa
 		coefficient = float64(totalBet) / float64(winnersBet)
 	}
 
-	response := fmt.Sprintf("✅ Опрос %s завершён! Победил: [%s] (№%d)\nКоэффициент: %.2f\nПобедители:\n", pollID, poll.Options[winningOption-1], winningOption, coefficient)
+	response := fmt.Sprintf("✅ **Опрос %s завершён!** 🏆\nПобедил: **%s** (№%d)\n📈 **Коэффициент:** %.2f\n\n🎉 **Победители:**\n", pollID, poll.Options[winningOption-1], winningOption, coefficient)
 	for userID, choice := range poll.Choices {
 		if choice == winningOption {
 			winnings := int(float64(poll.Bets[userID]) * coefficient)
 			r.UpdateRating(userID, winnings+poll.Bets[userID])
-			response += fmt.Sprintf("<@%s>: %d кредитов (ставка: %d)\n", userID, winnings+poll.Bets[userID], poll.Bets[userID])
+			response += fmt.Sprintf("<@%s>: %d кредитов (ставка: %d) 💰\n", userID, winnings+poll.Bets[userID], poll.Bets[userID])
 		}
 	}
 	if winnersBet == 0 {
-		response += "Никто не победил!"
+		response += "Никто не победил! 😢"
 	}
 
 	poll.Active = false
@@ -441,7 +455,7 @@ func (r *Ranking) HandlePollsCommand(s *discordgo.Session, m *discordgo.MessageC
 	defer r.mu.Unlock()
 
 	if len(r.polls) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "📊 Нет активных опросов! Создай новый с помощью `!cpoll`!")
+		s.ChannelMessageSend(m.ChannelID, "📊 Нет активных опросов! Создай новый с помощью `!cpoll`! 🎉")
 		return
 	}
 
@@ -450,16 +464,16 @@ func (r *Ranking) HandlePollsCommand(s *discordgo.Session, m *discordgo.MessageC
 		if !poll.Active {
 			continue
 		}
-		response += fmt.Sprintf("\n**Опрос %s: %s**\n", pollID, poll.Question)
+		response += fmt.Sprintf("\n**Опрос %s: %s** 🎉\n", pollID, poll.Question)
 		coefficients := poll.GetCoefficients()
 		for i, option := range poll.Options {
-			response += fmt.Sprintf("Вариант %d. [%s] (Коэффициент: %.2f)\n", i+1, option, coefficients[i])
+			response += fmt.Sprintf("📋 Вариант %d. [%s] (📈 Коэффициент: %.2f)\n", i+1, option, coefficients[i])
 			// Показываем, кто поставил на этот вариант
 			for userID, choice := range poll.Choices {
 				if choice == i+1 {
 					bet := poll.Bets[userID]
 					potentialWin := int(float64(bet) * coefficients[i])
-					response += fmt.Sprintf("  - <@%s>: %d кредитов (Потенциальный выигрыш: %d)\n", userID, bet, potentialWin+bet)
+					response += fmt.Sprintf("  - <@%s>: %d кредитов (💰 Потенциальный выигрыш: %d)\n", userID, bet, potentialWin+bet)
 				}
 			}
 		}
@@ -469,199 +483,251 @@ func (r *Ranking) HandlePollsCommand(s *discordgo.Session, m *discordgo.MessageC
 	log.Printf("Polls list sent to %s", m.Author.ID)
 }
 
-// !redblack
-func (r *Ranking) StartRedBlackGame(s *discordgo.Session, m *discordgo.MessageCreate) {
-	log.Printf("Processing !redblack: %s from %s", m.Content, m.Author.ID)
+// !rb
+// !rb
+func (r *Ranking) StartRBGame(s *discordgo.Session, m *discordgo.MessageCreate) {
+	log.Printf("StartRBGame called for user %s", m.Author.ID)
 
 	r.mu.Lock()
-	// Проверяем, не играет ли пользователь уже
-	if game, exists := r.redBlackGames[m.Author.ID]; exists && game.Active {
-		s.ChannelMessageSend(m.ChannelID, "❌ Ты уже играешь! Заверши текущую игру или выбери ставку!")
-		r.mu.Unlock()
-		return
-	}
-
-	// Создаём новую игру
+	gameID := generateGameID(m.Author.ID)
+	color := randomColor()
 	game := &RedBlackGame{
+		GameID:   gameID,
 		PlayerID: m.Author.ID,
 		Active:   true,
+		Color:    color,
 	}
-	r.redBlackGames[m.Author.ID] = game
+	r.redBlackGames[gameID] = game
 	r.mu.Unlock()
 
-	// Отправляем меню
 	embed := &discordgo.MessageEmbed{
-		Title:       "🎰 Казино: Красное-Чёрное",
-		Description: fmt.Sprintf("Добро пожаловать, <@%s>!\nВыбери цвет и сделай ставку.\n\n**Твой баланс:** %d кредитов\n\nНапиши: `!redblack <red/black> <сумма>`\nПример: `!redblack red 50`", m.Author.ID, r.GetRating(m.Author.ID)),
-		Color:       0xFFD700, // Золотой цвет
+		Title:       "🎰 Игра: Красный-Чёрный",
+		Description: fmt.Sprintf("Велком, <@%s>! 🥳\nИмператор велит: выбирать цвет и ставка делай!\n\n**💰 Баланса твоя:** %d кредитов\n\nПиши вот: `!rb <red/black> <сумма>`\nНапример: `!rb red 50`\nИмператор следит за тобой! 👑", m.Author.ID, r.GetRating(m.Author.ID)),
+		Color:       color,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Славь Императора и везёт тебе! 🍀",
+		},
 	}
 	msg, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
 	if err != nil {
-		log.Printf("Failed to send RedBlack menu: %v", err)
+		log.Printf("Failed to send RB menu: %v", err)
 		return
 	}
 
 	r.mu.Lock()
 	game.MenuMessageID = msg.ID
 	r.mu.Unlock()
+
+	// Запускаем таймер для отключения игры через 15 минут
+	go func(messageID string, channelID string) {
+		time.Sleep(15 * time.Minute)
+		r.mu.Lock()
+		if g, exists := r.redBlackGames[gameID]; exists && g.Active {
+			g.Active = false
+			delete(r.redBlackGames, gameID)
+			embed := &discordgo.MessageEmbed{
+				Title:       "🎰 Игра: Красный-Чёрный",
+				Description: fmt.Sprintf("Игра закончи, <@%s>! Время нету. ⏰\nИмператор недоволен! 😡", m.Author.ID),
+				Color:       color,
+				Footer: &discordgo.MessageEmbedFooter{
+					Text: "Время вышло! Император гневен! ⏰",
+				},
+			}
+			_, err := s.ChannelMessageEditEmbed(channelID, messageID, embed)
+			if err != nil {
+				log.Printf("Failed to update RB message on timeout: %v", err)
+			}
+		}
+		r.mu.Unlock()
+	}(msg.ID, m.ChannelID)
 }
 
-// !redblack <red/black> <amount>
-func (r *Ranking) HandleRedBlackCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
-	log.Printf("Processing !redblack: %s from %s", command, m.Author.ID)
-
+// !rb <red/black> <amount>
+func (r *Ranking) HandleRBCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	parts := strings.Fields(command)
 	if len(parts) < 3 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!redblack <red/black> <сумма>`\nПример: `!redblack red 50`")
+		r.sendTemporaryReply(s, m, "❌ Пиши правильно: `!rb <red/black> <сумма>`")
 		return
 	}
 
 	choice := strings.ToLower(parts[1])
 	if choice != "red" && choice != "black" {
-		s.ChannelMessageSend(m.ChannelID, "❌ Выбери `red` или `black`!")
+		r.sendTemporaryReply(s, m, "❌ Выбирать надо `red` или `black`! Император ждёт! 👑")
 		return
 	}
 
 	amount, err := strconv.Atoi(parts[2])
 	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом!")
+		r.sendTemporaryReply(s, m, "❌ Сумма надо число хорошее! Император не любит шутки! 😡")
 		return
 	}
 
 	userRating := r.GetRating(m.Author.ID)
 	if userRating < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d", userRating))
+		r.sendTemporaryReply(s, m, fmt.Sprintf("❌ Кредитов мало! Баланса твоя: %d 😢 Император не даст взаймы!", userRating))
 		return
 	}
 
 	r.mu.Lock()
-	game, exists := r.redBlackGames[m.Author.ID]
-	if !exists || !game.Active {
-		s.ChannelMessageSend(m.ChannelID, "❌ Начни игру с помощью `!redblack`!")
+	var game *RedBlackGame
+	for _, g := range r.redBlackGames {
+		if g.PlayerID == m.Author.ID && g.Active && g.Bet == 0 {
+			game = g
+			break
+		}
+	}
+	if game == nil {
+		r.sendTemporaryReply(s, m, "❌ Игру начинай с `!rb`! Император ждёт тебя! 👑")
 		r.mu.Unlock()
 		return
 	}
 
-	// Обновляем игру
 	game.Bet = amount
 	game.Choice = choice
 	r.mu.Unlock()
 
-	// Снимаем ставку
 	r.UpdateRating(m.Author.ID, -amount)
 
-	// Удаляем меню
-	if game.MenuMessageID != "" {
-		s.ChannelMessageDelete(m.ChannelID, game.MenuMessageID)
-	}
-
-	// Анимация
-	frames := []string{
-		"⚫🔴⚫🔴⚫🔴⚫🔴",
-		"🔴⚫🔴⚫🔴⚫🔴⚫",
-		"⚫🔴⚫🔴⚫🔴⚫🔴",
-		"🔴⚫🔴⚫🔴⚫🔴⚫",
-	}
+	// Обновляем "окно игры" с началом анимации
 	embed := &discordgo.MessageEmbed{
-		Title: "🎰 Красное-Чёрное: Анимация",
-		Color: 0xFFD700,
+		Title:       "🎰 Игра: Красный-Чёрный",
+		Description: fmt.Sprintf("<@%s> ставка делай %d кредитов на %s!\n\n🎲 Крутим-крутим... Император смотрит! 👑", m.Author.ID, amount, choice),
+		Color:       game.Color,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Славь Императора и везёт тебе! 🍀",
+		},
 	}
-	msg, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel: m.ChannelID,
+		ID:      game.MenuMessageID,
+		Embed:   embed,
+	})
 	if err != nil {
-		log.Printf("Failed to send RedBlack animation: %v", err)
+		log.Printf("Failed to update RB message: %v", err)
 		return
 	}
 
-	for _, frame := range frames {
-		embed.Description = fmt.Sprintf("<@%s> поставил %d кредитов на %s!\n\n%s", m.Author.ID, amount, choice, frame)
-		_, err = s.ChannelMessageEditEmbed(m.ChannelID, msg.ID, embed)
+	// Анимация: переключаем цвета несколько раз
+	colors := []string{"🔴", "⚫"}
+	for i := 0; i < 5; i++ {
+		color := colors[i%2]
+		embed.Description = fmt.Sprintf("<@%s> ставка делай %d кредитов на %s!\n\n🎲 Крутим-крутим... %s Император смотрит! 👑", m.Author.ID, amount, choice, color)
+		_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel: m.ChannelID,
+			ID:      game.MenuMessageID,
+			Embed:   embed,
+		})
 		if err != nil {
-			log.Printf("Failed to update RedBlack animation: %v", err)
+			log.Printf("Failed to update RB animation: %v", err)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Генерируем результат
-	rand.Seed(time.Now().UnixNano())
+	// Финальный результат
 	result := "red"
 	if rand.Intn(2) == 1 {
 		result = "black"
 	}
-
-	// Визуал
 	colorEmoji := "🔴"
 	if result == "black" {
 		colorEmoji = "⚫"
 	}
-	embed.Description = fmt.Sprintf("<@%s> поставил %d кредитов на %s!\n\nРезультат: %s", m.Author.ID, amount, choice, colorEmoji)
 
-	// Проверяем результат
+	embed.Description = fmt.Sprintf("<@%s> ставка делай %d кредитов на %s!\n\n🎲 Результат: %s", m.Author.ID, amount, choice, colorEmoji)
 	if result == choice {
 		winnings := amount * 2
 		r.UpdateRating(m.Author.ID, winnings)
-		embed.Description += fmt.Sprintf("\n\n✅ Победа! Ты выиграл %d кредитов!", winnings)
+		embed.Description += fmt.Sprintf("\n\n✅ Победа! Император доволен! Ты бери %d кредитов! 🎉", winnings)
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: "Император хвалит тебя! 🏆"}
 	} else {
-		embed.Description += fmt.Sprintf("\n\n❌ Проигрыш! Потеряно: %d кредитов.", amount)
+		embed.Description += fmt.Sprintf("\n\n❌ Проиграл! Император гневен! Потерял: %d кредитов. 😢", amount)
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: "Император недоволен! 😡"}
 	}
 
-	// Добавляем кнопку "Сыграть снова"
+	// Редактируем существующее сообщение вместо создания нового
+	customID := fmt.Sprintf("rb_replay_%s_%d", game.PlayerID, time.Now().UnixNano())
+	log.Printf("Setting button CustomID: %s", customID)
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
 				discordgo.Button{
-					Label:    "Сыграть снова",
+					Label:    "Играть снова для Императора! 🎮",
 					Style:    discordgo.PrimaryButton,
-					CustomID: fmt.Sprintf("redblack_replay_%s", m.Author.ID),
+					CustomID: customID,
 				},
 			},
 		},
 	}
-
-	// Исправлено: передаём указатель на слайс
-	componentsPtr := &components
 	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    m.ChannelID,
-		ID:         msg.ID,
+		ID:         game.MenuMessageID, // Редактируем существующее сообщение
 		Embed:      embed,
-		Components: componentsPtr,
+		Components: &components,
 	})
 	if err != nil {
-		log.Printf("Failed to add replay button for RedBlack: %v", err)
+		log.Printf("Failed to edit RB message with button: %v", err)
+		return
 	}
 
-	// Завершаем игру
+	// Обновляем MenuMessageID (хотя ID не меняется, оставляем для консистентности)
 	r.mu.Lock()
 	game.Active = false
+	delete(r.redBlackGames, game.GameID)
 	r.mu.Unlock()
 
-	log.Printf("RedBlack game for %s: bet %d on %s, result %s", m.Author.ID, amount, choice, result)
+	// Запускаем таймер для отключения кнопки через 15 минут
+	go func(messageID string, channelID string) {
+		time.Sleep(15 * time.Minute)
+		r.mu.Lock()
+		// Проверяем, не была ли игра уже завершена
+		var activeGame *RedBlackGame
+		for _, g := range r.redBlackGames {
+			if g.MenuMessageID == messageID && g.Active {
+				activeGame = g
+				break
+			}
+		}
+		if activeGame == nil {
+			// Если игры нет или она неактивна, отключаем кнопку
+			emptyComponents := []discordgo.MessageComponent{}
+			_, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+				Channel:    channelID,
+				ID:         messageID,
+				Embed:      embed,
+				Components: &emptyComponents,
+			})
+			if err != nil {
+				log.Printf("Failed to disable RB button: %v", err)
+			}
+			log.Printf("Disabled RB button for message %s", messageID)
+		}
+		r.mu.Unlock()
+	}(game.MenuMessageID, m.ChannelID)
 }
 
 // !blackjack
 func (r *Ranking) StartBlackjackGame(s *discordgo.Session, m *discordgo.MessageCreate) {
-	log.Printf("Processing !blackjack: %s from %s", m.Content, m.Author.ID)
-
 	r.mu.Lock()
-	if game, exists := r.blackjackGames[m.Author.ID]; exists && game.Active {
-		s.ChannelMessageSend(m.ChannelID, "❌ Ты уже играешь в блэкджек! Заверши текущую игру или выбери ставку!")
-		r.mu.Unlock()
-		return
-	}
-
-	// Создаём новую игру
+	gameID := generateGameID(m.Author.ID)
+	color := randomColor()
 	game := &BlackjackGame{
+		GameID:       gameID,
 		PlayerID:     m.Author.ID,
 		Active:       true,
 		LastActivity: time.Now(),
+		Color:        color,
+		ChannelID:    m.ChannelID,
 	}
-	r.blackjackGames[m.Author.ID] = game
+	r.blackjackGames[gameID] = game
 	r.mu.Unlock()
 
-	// Отправляем меню
 	embed := &discordgo.MessageEmbed{
-		Title:       "♠️ Казино: Блэкджек",
-		Description: fmt.Sprintf("Добро пожаловать, <@%s>!\nСделай ставку, чтобы начать игру.\n\n**Твой баланс:** %d кредитов\n\nНапиши: `!blackjack <сумма>`\nПример: `!blackjack 50`", m.Author.ID, r.GetRating(m.Author.ID)),
-		Color:       0xFFD700, // Золотой цвет
+		Title:       "♠️ Казино: Блэкджек 🎰",
+		Description: fmt.Sprintf("Добро пожаловать, <@%s>! 🎉\nСделай ставку, чтобы начать игру.\n\n**💰 Твой баланс:** %d кредитов\n\nНапиши: `!blackjack <сумма>`", m.Author.ID, r.GetRating(m.Author.ID)),
+		Color:       color,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Играй с умом! 🍀",
+		},
 	}
 	msg, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
 	if err != nil {
@@ -673,51 +739,58 @@ func (r *Ranking) StartBlackjackGame(s *discordgo.Session, m *discordgo.MessageC
 	game.MenuMessageID = msg.ID
 	r.mu.Unlock()
 
-	// Запускаем таймер неактивности
-	go r.blackjackTimeout(s, m.Author.ID)
+	go r.blackjackTimeout(s, gameID)
+}
+
+func (r *Ranking) sendTemporaryReply(s *discordgo.Session, m *discordgo.MessageCreate, content string) {
+	msg, err := s.ChannelMessageSendReply(m.ChannelID, content, m.Reference())
+	if err != nil {
+		log.Printf("Failed to send temporary reply: %v", err)
+		return
+	}
+	time.Sleep(5 * time.Second)
+	s.ChannelMessageDelete(m.ChannelID, msg.ID)
 }
 
 // !blackjack <amount>
 func (r *Ranking) HandleBlackjackBet(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
-	log.Printf("Processing !blackjack bet: %s from %s", command, m.Author.ID)
-
 	parts := strings.Fields(command)
 	if len(parts) != 2 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!blackjack <сумма>`\nПример: `!blackjack 50`")
+		r.sendTemporaryReply(s, m, "❌ Используй: `!blackjack <сумма>`\nПример: `!blackjack 50`")
 		return
 	}
 
 	amount, err := strconv.Atoi(parts[1])
 	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом!")
+		r.sendTemporaryReply(s, m, "❌ Сумма должна быть положительным числом!")
 		return
 	}
 
 	userRating := r.GetRating(m.Author.ID)
 	if userRating < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d", userRating))
+		r.sendTemporaryReply(s, m, fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d", userRating))
 		return
 	}
 
 	r.mu.Lock()
-	game, exists := r.blackjackGames[m.Author.ID]
-	if !exists || !game.Active {
-		s.ChannelMessageSend(m.ChannelID, "❌ Начни игру с помощью `!blackjack`!")
+	var game *BlackjackGame
+	for _, g := range r.blackjackGames {
+		if g.PlayerID == m.Author.ID && g.Active && g.Bet == 0 { // Находим первую активную игру без ставки
+			game = g
+			break
+		}
+	}
+	if game == nil {
+		r.sendTemporaryReply(s, m, "❌ Начни игру с помощью `!blackjack`!")
 		r.mu.Unlock()
 		return
 	}
 
-	// Обновляем игру
 	game.Bet = amount
+	game.LastActivity = time.Now() // Обновляем LastActivity
 	r.mu.Unlock()
 
-	// Снимаем ставку
 	r.UpdateRating(m.Author.ID, -amount)
-
-	// Удаляем меню
-	if game.MenuMessageID != "" {
-		s.ChannelMessageDelete(m.ChannelID, game.MenuMessageID)
-	}
 
 	// Инициализируем колоду
 	suits := []string{"♠️", "♥️", "♦️", "♣️"}
@@ -737,46 +810,36 @@ func (r *Ranking) HandleBlackjackBet(s *discordgo.Session, m *discordgo.MessageC
 	r.mu.Lock()
 	game.PlayerCards = playerCards
 	game.DealerCards = dealerCards
+	game.LastActivity = time.Now() // Ещё раз обновляем, чтобы быть уверенными
 	r.mu.Unlock()
 
-	// Показываем карты
+	// Обновляем "окно игры"
 	embed := &discordgo.MessageEmbed{
-		Title:       "♠️ Блэкджек",
-		Description: fmt.Sprintf("<@%s> начал игру со ставкой %d кредитов!\n\n**Твои карты:** %s (Сумма: %d)\n**Карты дилера:** %s [Скрытая карта]", m.Author.ID, amount, r.cardsToString(playerCards), r.calculateHand(playerCards), r.cardToString(dealerCards[0])),
-		Color:       0xFFD700,
+		Title:       "♠️ Блэкджек 🎲",
+		Description: fmt.Sprintf("<@%s> начал игру со ставкой %d кредитов! 💸\n\n**🃏 Твои карты:** %s (Сумма: %d)\n**🃏 Карты дилера:** %s [Скрытая карта]", m.Author.ID, amount, r.cardsToString(playerCards), r.calculateHand(playerCards), r.cardToString(dealerCards[0])),
+		Color:       game.Color,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Сделай ход! 🍀",
+		},
 	}
-
-	// Добавляем кнопки Hit и Stand
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
-				discordgo.Button{
-					Label:    "Hit",
-					Style:    discordgo.PrimaryButton,
-					CustomID: fmt.Sprintf("blackjack_hit_%s", m.Author.ID),
-				},
-				discordgo.Button{
-					Label:    "Stand",
-					Style:    discordgo.SecondaryButton,
-					CustomID: fmt.Sprintf("blackjack_stand_%s", m.Author.ID),
-				},
+				discordgo.Button{Label: "Взять карту 🃏", Style: discordgo.PrimaryButton, CustomID: fmt.Sprintf("blackjack_hit_%s", game.GameID)},
+				discordgo.Button{Label: "Остановиться ⏹️", Style: discordgo.SecondaryButton, CustomID: fmt.Sprintf("blackjack_stand_%s", game.GameID)},
 			},
 		},
 	}
 
-	// Исправлено: передаём слайс components напрямую, без указателя
-	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    m.ChannelID,
+		ID:         game.MenuMessageID,
 		Embed:      embed,
-		Components: components, // Убрали componentsPtr, так как MessageSend ожидает []discordgo.MessageComponent
+		Components: &components,
 	})
 	if err != nil {
-		log.Printf("Failed to send Blackjack game message: %v", err)
-		return
+		log.Printf("Failed to update Blackjack game message: %v", err)
 	}
-
-	r.mu.Lock()
-	game.GameMessageID = msg.ID
-	r.mu.Unlock()
 }
 
 func (r *Ranking) cardsToString(cards []Card) string {
@@ -813,13 +876,13 @@ func (r *Ranking) calculateHand(cards []Card) int {
 	return sum
 }
 
-func (r *Ranking) blackjackTimeout(s *discordgo.Session, playerID string) {
+func (r *Ranking) blackjackTimeout(s *discordgo.Session, gameID string) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		r.mu.Lock()
-		game, exists := r.blackjackGames[playerID]
+		game, exists := r.blackjackGames[gameID]
 		if !exists || !game.Active {
 			r.mu.Unlock()
 			return
@@ -827,22 +890,22 @@ func (r *Ranking) blackjackTimeout(s *discordgo.Session, playerID string) {
 
 		if time.Since(game.LastActivity) > 60*time.Second {
 			game.Active = false
-			// Удаляем кнопки
-			emptyComponents := []discordgo.MessageComponent{}
-			emptyComponentsPtr := &emptyComponents
-			_, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
-				Channel:    r.floodChannelID,
-				ID:         game.GameMessageID,
-				Embed:      &discordgo.MessageEmbed{Title: "♠️ Блэкджек", Description: fmt.Sprintf("Игра завершена: <@%s> ушёл из-за стола!", playerID), Color: 0xFFD700},
-				Components: emptyComponentsPtr, // Исправлено: передаём указатель на слайс
-			})
-			if err != nil {
-				log.Printf("Failed to remove buttons on timeout: %v", err)
+			embed := &discordgo.MessageEmbed{
+				Title:       "♠️ Блэкджек 🎲",
+				Description: fmt.Sprintf("Игра завершена: <@%s> ушёл из-за стола! 😢", game.PlayerID),
+				Color:       game.Color,
+				Footer: &discordgo.MessageEmbedFooter{
+					Text: "Время вышло! ⏰",
+				},
 			}
+			_, err := s.ChannelMessageEditEmbed(game.ChannelID, game.MenuMessageID, embed)
+			if err != nil {
+				log.Printf("Failed to edit message on timeout: %v", err)
+			}
+			// Удаляем игру из blackjackGames
+			delete(r.blackjackGames, gameID)
 			r.mu.Unlock()
-			// Отправляем уведомление в чат
-			s.ChannelMessageSend(r.floodChannelID, fmt.Sprintf("♠️ <@%s> ушёл из-за стола и потерял %d кредитов!", playerID, game.Bet))
-			log.Printf("Blackjack game for %s timed out", playerID)
+			s.ChannelMessageSendReply(r.floodChannelID, fmt.Sprintf("♠️ <@%s> ушёл и потерял %d кредитов! 💸", game.PlayerID, game.Bet), &discordgo.MessageReference{MessageID: game.MenuMessageID, ChannelID: r.floodChannelID})
 			return
 		}
 		r.mu.Unlock()
@@ -850,115 +913,132 @@ func (r *Ranking) blackjackTimeout(s *discordgo.Session, playerID string) {
 }
 
 func (r *Ranking) HandleBlackjackHit(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Исправлено: CustomID берём из MessageComponentData
-	playerID := strings.Split(i.MessageComponentData().CustomID, "_")[2]
-
-	r.mu.Lock()
-	game, exists := r.blackjackGames[playerID]
-	if !exists || !game.Active {
+	parts := strings.Split(i.MessageComponentData().CustomID, "_")
+	if len(parts) < 3 {
+		log.Printf("Invalid CustomID format: %s", i.MessageComponentData().CustomID)
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "❌ У тебя нет активной игры в блэкджек! Начни новую с `!blackjack`!",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
+			Data: &discordgo.InteractionResponseData{Content: "❌ Ошибка: неверный формат кнопки!", Flags: discordgo.MessageFlagsEphemeral},
+		})
+		return
+	}
+	// Объединяем все части после "blackjack_hit_"
+	gameID := strings.Join(parts[2:], "_")
+
+	r.mu.Lock()
+	game, exists := r.blackjackGames[gameID]
+	if !exists {
+		log.Printf("Game not found for GameID: %s", gameID)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: "❌ Игра не найдена!", Flags: discordgo.MessageFlagsEphemeral},
+		})
+		r.mu.Unlock()
+		return
+	}
+	if !game.Active {
+		log.Printf("Game is not active for GameID: %s, PlayerID: %s", gameID, game.PlayerID)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: "❌ Игра завершена!", Flags: discordgo.MessageFlagsEphemeral},
 		})
 		r.mu.Unlock()
 		return
 	}
 
-	// Добавляем карту игроку
 	deck := r.generateDeck()
 	newCard := deck[len(game.PlayerCards)+len(game.DealerCards)]
 	game.PlayerCards = append(game.PlayerCards, newCard)
-	game.LastActivity = time.Now()
-
+	game.LastActivity = time.Now() // Обновляем LastActivity
 	playerSum := r.calculateHand(game.PlayerCards)
-	embed := &discordgo.MessageEmbed{
-		Title: "♠️ Блэкджек",
-		Color: 0xFFD700,
-	}
 
+	embed := &discordgo.MessageEmbed{
+		Title: "♠️ Блэкджек 🎲",
+		Color: game.Color,
+	}
 	var components []discordgo.MessageComponent
 	if playerSum > 21 {
 		game.Active = false
-		embed.Description = fmt.Sprintf("Ты взял карту: %s\n**Твои карты:** %s (Сумма: %d)\n**Карты дилера:** %s [Скрытая карта]\n\n❌ Перебор! Ты проиграл!", r.cardToString(newCard), r.cardsToString(game.PlayerCards), playerSum, r.cardToString(game.DealerCards[0]))
-		// Добавляем кнопку "Сыграть снова"
+		embed.Description = fmt.Sprintf("Ты взял карту: %s\n**🃏 Твои карты:** %s (Сумма: %d)\n**🃏 Карты дилера:** %s [Скрытая]\n\n❌ Перебор! Ты проиграл! 💥", r.cardToString(newCard), r.cardsToString(game.PlayerCards), playerSum, r.cardToString(game.DealerCards[0]))
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: "Не повезло! 😢"}
 		components = []discordgo.MessageComponent{
 			discordgo.ActionsRow{
 				Components: []discordgo.MessageComponent{
 					discordgo.Button{
-						Label:    "Сыграть снова",
+						Label:    "Сыграть снова 🎮",
 						Style:    discordgo.PrimaryButton,
-						CustomID: fmt.Sprintf("blackjack_replay_%s", playerID),
+						CustomID: fmt.Sprintf("blackjack_replay_%s_%s", game.PlayerID, game.MenuMessageID),
 					},
 				},
 			},
 		}
+		// Удаляем игру из blackjackGames
+		delete(r.blackjackGames, gameID)
 	} else {
-		embed.Description = fmt.Sprintf("Ты взял карту: %s\n**Твои карты:** %s (Сумма: %d)\n**Карты дилера:** %s [Скрытая карта]", r.cardToString(newCard), r.cardsToString(game.PlayerCards), playerSum, r.cardToString(game.DealerCards[0]))
+		embed.Description = fmt.Sprintf("Ты взял карту: %s\n**🃏 Твои карты:** %s (Сумма: %d)\n**🃏 Карты дилера:** %s [Скрытая]", r.cardToString(newCard), r.cardsToString(game.PlayerCards), playerSum, r.cardToString(game.DealerCards[0]))
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: "Продолжаем! 🍀"}
 		components = []discordgo.MessageComponent{
 			discordgo.ActionsRow{
 				Components: []discordgo.MessageComponent{
-					discordgo.Button{
-						Label:    "Hit",
-						Style:    discordgo.PrimaryButton,
-						CustomID: fmt.Sprintf("blackjack_hit_%s", playerID),
-					},
-					discordgo.Button{
-						Label:    "Stand",
-						Style:    discordgo.SecondaryButton,
-						CustomID: fmt.Sprintf("blackjack_stand_%s", playerID),
-					},
+					discordgo.Button{Label: "Взять карту 🃏", Style: discordgo.PrimaryButton, CustomID: fmt.Sprintf("blackjack_hit_%s", game.GameID)},
+					discordgo.Button{Label: "Остановиться ⏹️", Style: discordgo.SecondaryButton, CustomID: fmt.Sprintf("blackjack_stand_%s", game.GameID)},
 				},
 			},
 		}
 	}
-
-	// Исправлено: передаём указатель на слайс
-	componentsPtr := &components
 	r.mu.Unlock()
 
-	// Обновляем сообщение
 	_, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    i.ChannelID,
-		ID:         game.GameMessageID,
+		ID:         game.MenuMessageID,
 		Embed:      embed,
-		Components: componentsPtr,
+		Components: &components,
 	})
 	if err != nil {
 		log.Printf("Failed to update Blackjack message: %v", err)
 	}
 
-	// Отвечаем на взаимодействие
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredMessageUpdate,
-	})
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredMessageUpdate})
 }
 
 func (r *Ranking) HandleBlackjackStand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Исправлено: CustomID берём из MessageComponentData
-	playerID := strings.Split(i.MessageComponentData().CustomID, "_")[2]
-
-	r.mu.Lock()
-	game, exists := r.blackjackGames[playerID]
-	if !exists || !game.Active {
+	parts := strings.Split(i.MessageComponentData().CustomID, "_")
+	if len(parts) < 3 {
+		log.Printf("Invalid CustomID format: %s", i.MessageComponentData().CustomID)
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "❌ У тебя нет активной игры в блэкджек! Начни новую с `!blackjack`!",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
+			Data: &discordgo.InteractionResponseData{Content: "❌ Ошибка: неверный формат кнопки!", Flags: discordgo.MessageFlagsEphemeral},
+		})
+		return
+	}
+	// Объединяем все части после "blackjack_stand_"
+	gameID := strings.Join(parts[2:], "_")
+
+	r.mu.Lock()
+	game, theGameExists := r.blackjackGames[gameID]
+	if !theGameExists {
+		log.Printf("Game not found for GameID: %s", gameID)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: "❌ Игра не найдена!", Flags: discordgo.MessageFlagsEphemeral},
+		})
+		r.mu.Unlock()
+		return
+	}
+	if !game.Active {
+		log.Printf("Game is not active for GameID: %s, PlayerID: %s", gameID, game.PlayerID)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: "❌ Игра завершена!", Flags: discordgo.MessageFlagsEphemeral},
 		})
 		r.mu.Unlock()
 		return
 	}
 
-	game.LastActivity = time.Now()
+	game.LastActivity = time.Now() // Обновляем LastActivity
 	playerSum := r.calculateHand(game.PlayerCards)
 	dealerSum := r.calculateHand(game.DealerCards)
 
-	// Дилер добирает карты
 	deck := r.generateDeck()
 	cardIndex := len(game.PlayerCards) + len(game.DealerCards)
 	for dealerSum < 17 && cardIndex < len(deck) {
@@ -968,169 +1048,239 @@ func (r *Ranking) HandleBlackjackStand(s *discordgo.Session, i *discordgo.Intera
 	}
 
 	embed := &discordgo.MessageEmbed{
-		Title:       "♠️ Блэкджек",
-		Description: fmt.Sprintf("**Твои карты:** %s (Сумма: %d)\n**Карты дилера:** %s (Сумма: %d)", r.cardsToString(game.PlayerCards), playerSum, r.cardsToString(game.DealerCards), dealerSum),
-		Color:       0xFFD700,
+		Title:       "♠️ Блэкджек 🎲",
+		Description: fmt.Sprintf("**🃏 Твои карты:** %s (Сумма: %d)\n**🃏 Карты дилера:** %s (Сумма: %d)", r.cardsToString(game.PlayerCards), playerSum, r.cardsToString(game.DealerCards), dealerSum),
+		Color:       game.Color,
 	}
 
 	var result string
 	if dealerSum > 21 {
 		winnings := game.Bet * 2
-		r.UpdateRating(playerID, winnings)
-		result = fmt.Sprintf("✅ Дилер перебрал! Ты выиграл %d кредитов!", winnings)
+		r.UpdateRating(game.PlayerID, winnings)
+		result = fmt.Sprintf("✅ Дилер перебрал! Ты выиграл %d кредитов! 🎉", winnings)
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: "Победа! 🏆"}
 	} else if playerSum > dealerSum {
 		winnings := game.Bet * 2
-		r.UpdateRating(playerID, winnings)
-		result = fmt.Sprintf("✅ Ты выиграл! %d кредитов твои!", winnings)
+		r.UpdateRating(game.PlayerID, winnings)
+		result = fmt.Sprintf("✅ Ты выиграл! %d кредитов твои! 🎉", winnings)
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: "Победа! 🏆"}
 	} else if playerSum == dealerSum {
-		r.UpdateRating(playerID, game.Bet)
-		result = "🤝 Ничья! Твоя ставка возвращена."
+		r.UpdateRating(game.PlayerID, game.Bet)
+		result = "🤝 Ничья! Твоя ставка возвращена. 🔄"
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: "Ничья! 🤝"}
 	} else {
-		result = "❌ Дилер победил!"
+		result = "❌ Дилер победил! 💥"
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: "Не повезло! 😢"}
 	}
 
 	embed.Description += fmt.Sprintf("\n\n%s", result)
 
-	// Добавляем кнопку "Сыграть снова"
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
 				discordgo.Button{
-					Label:    "Сыграть снова",
+					Label:    "Сыграть снова 🎮",
 					Style:    discordgo.PrimaryButton,
-					CustomID: fmt.Sprintf("blackjack_replay_%s", playerID),
+					CustomID: fmt.Sprintf("blackjack_replay_%s_%s", game.PlayerID, game.MenuMessageID),
 				},
 			},
 		},
 	}
 
-	// Исправлено: передаём указатель на слайс
-	componentsPtr := &components
 	game.Active = false
+	// Удаляем игру из blackjackGames
+	delete(r.blackjackGames, gameID)
 	r.mu.Unlock()
 
-	// Обновляем сообщение
 	_, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    i.ChannelID,
-		ID:         game.GameMessageID,
+		ID:         game.MenuMessageID,
 		Embed:      embed,
-		Components: componentsPtr,
+		Components: &components,
 	})
 	if err != nil {
 		log.Printf("Failed to update Blackjack message: %v", err)
 	}
 
-	// Отвечаем на взаимодействие
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredMessageUpdate,
-	})
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredMessageUpdate})
 }
 
 func (r *Ranking) HandleBlackjackReplay(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Исправлено: CustomID берём из MessageComponentData
-	playerID := strings.Split(i.MessageComponentData().CustomID, "_")[2]
-
-	r.mu.Lock()
-	// Проверяем, не играет ли пользователь уже
-	if game, exists := r.blackjackGames[playerID]; exists && game.Active {
+	parts := strings.Split(i.MessageComponentData().CustomID, "_")
+	if len(parts) != 4 {
+		log.Printf("Invalid CustomID format: %s", i.MessageComponentData().CustomID)
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Ты уже играешь в блэкджек! Заверши текущую игру или выбери ставку!",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
+			Data: &discordgo.InteractionResponseData{Content: "❌ Ошибка: неверный формат кнопки!", Flags: discordgo.MessageFlagsEphemeral},
 		})
-		r.mu.Unlock()
 		return
 	}
+	playerID := parts[2]
+	menuMessageID := parts[3]
 
-	// Создаём новую игру
+	newGameID := generateGameID(playerID)
+	newColor := randomColor()
 	game := &BlackjackGame{
-		PlayerID:     playerID,
-		Active:       true,
-		LastActivity: time.Now(),
-	}
-	r.blackjackGames[playerID] = game
-	r.mu.Unlock()
-
-	// Отправляем меню
-	embed := &discordgo.MessageEmbed{
-		Title:       "♠️ Казино: Блэкджек",
-		Description: fmt.Sprintf("Добро пожаловать, <@%s>!\nСделай ставку, чтобы начать игру.\n\n**Твой баланс:** %d кредитов\n\nНапиши: `!blackjack <сумма>`\nПример: `!blackjack 50`", playerID, r.GetRating(playerID)),
-		Color:       0xFFD700,
-	}
-	msg, err := s.ChannelMessageSendEmbed(i.ChannelID, embed)
-	if err != nil {
-		log.Printf("Failed to send Blackjack menu: %v", err)
-		return
+		GameID:        newGameID,
+		PlayerID:      playerID,
+		Active:        true,
+		LastActivity:  time.Now(),
+		Color:         newColor,
+		ChannelID:     i.ChannelID,
+		MenuMessageID: menuMessageID, // Используем переданный MenuMessageID
 	}
 
 	r.mu.Lock()
-	game.MenuMessageID = msg.ID
+	r.blackjackGames[newGameID] = game
 	r.mu.Unlock()
 
-	// Запускаем таймер неактивности
-	go r.blackjackTimeout(s, playerID)
+	embed := &discordgo.MessageEmbed{
+		Title:       "♠️ Казино: Блэкджек 🎰",
+		Description: fmt.Sprintf("Добро пожаловать, <@%s>! 🎉\nСделай ставку, чтобы начать игру.\n\n**💰 Твой баланс:** %d кредитов\n\nНапиши: `!blackjack <сумма>`", playerID, r.GetRating(playerID)),
+		Color:       newColor,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Играй с умом! 🍀",
+		},
+	}
 
-	// Отвечаем на взаимодействие
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredMessageUpdate,
+	_, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    i.ChannelID,
+		ID:         menuMessageID,
+		Embed:      embed,
+		Components: &[]discordgo.MessageComponent{}, // Убираем кнопки
 	})
+	if err != nil {
+		log.Printf("Failed to update Blackjack menu: %v", err)
+	}
+
+	go r.blackjackTimeout(s, newGameID)
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredMessageUpdate})
 }
 
-func (r *Ranking) HandleRedBlackReplay(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Исправлено: CustomID берём из MessageComponentData
-	playerID := strings.Split(i.MessageComponentData().CustomID, "_")[2]
+func (r *Ranking) HandleRBReplay(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	log.Printf("HandleRBReplay called, CustomID: %s", i.MessageComponentData().CustomID)
 
-	r.mu.Lock()
-	// Проверяем, не играет ли пользователь уже
-	if game, exists := r.redBlackGames[playerID]; exists && game.Active {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Ты уже играешь! Заверши текущую игру или выбери ставку!",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
+	// Сначала отвечаем на взаимодействие, чтобы избежать тайм-аута
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredMessageUpdate,
+	})
+	if err != nil {
+		log.Printf("Failed to respond to interaction: %v", err)
+		return
+	}
+	log.Printf("Interaction response sent for player %s", i.Member.User.ID)
+
+	// Разбираем CustomID
+	parts := strings.Split(i.MessageComponentData().CustomID, "_")
+	if len(parts) != 4 { // Ожидаем rb_replay_<playerID>_<timestamp>
+		log.Printf("Invalid CustomID format: %s, expected 4 parts, got %d", i.MessageComponentData().CustomID, len(parts))
+		_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Content: "❌ Ошибка: кнопка сломана! Император гневен! 😡",
+			Flags:   discordgo.MessageFlagsEphemeral,
 		})
-		r.mu.Unlock()
+		if err != nil {
+			log.Printf("Failed to send followup message: %v", err)
+		}
+		return
+	}
+	playerID := parts[2]
+	// timestamp := parts[3] // Не используем, но оставляем для формата
+	log.Printf("Parsed playerID: %s", playerID)
+
+	// Проверяем, совпадает ли playerID с пользователем, который нажал кнопку
+	if playerID != i.Member.User.ID {
+		log.Printf("PlayerID mismatch: expected %s, got %s", playerID, i.Member.User.ID)
+		_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Content: "❌ Кнопка не твоя! Император не позволит! 👑",
+			Flags:   discordgo.MessageFlagsEphemeral,
+		})
+		if err != nil {
+			log.Printf("Failed to send followup message: %v", err)
+		}
 		return
 	}
 
 	// Создаём новую игру
+	newGameID := generateGameID(playerID)
+	newColor := randomColor()
 	game := &RedBlackGame{
+		GameID:   newGameID,
 		PlayerID: playerID,
 		Active:   true,
+		Color:    newColor,
 	}
-	r.redBlackGames[playerID] = game
+	r.mu.Lock()
+	r.redBlackGames[newGameID] = game
 	r.mu.Unlock()
+	log.Printf("Created new RB game with ID %s for player %s", newGameID, playerID)
 
-	// Отправляем меню
+	// Редактируем существующее сообщение вместо создания нового
 	embed := &discordgo.MessageEmbed{
-		Title:       "🎰 Казино: Красное-Чёрное",
-		Description: fmt.Sprintf("Добро пожаловать, <@%s>!\nВыбери цвет и сделай ставку.\n\n**Твой баланс:** %d кредитов\n\nНапиши: `!redblack <red/black> <сумма>`\nПример: `!redblack red 50`", playerID, r.GetRating(playerID)),
-		Color:       0xFFD700,
+		Title:       "🎰 Игра: Красный-Чёрный",
+		Description: fmt.Sprintf("Велком снова, <@%s>! 🥳\nИмператор даёт шанс: выбирать цвет и ставка делай!\n\n**💰 Баланса твоя:** %d кредитов\n\nПиши вот: `!rb <red/black> <сумма>`\nНапример: `!rb red 50`\nИмператор следит за тобой! 👑", playerID, r.GetRating(playerID)),
+		Color:       newColor,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Славь Императора и везёт тебе! 🍀",
+		},
 	}
-	msg, err := s.ChannelMessageSendEmbed(i.ChannelID, embed)
+	log.Printf("Editing existing RB embed for player %s, message ID: %s", playerID, i.Message.ID)
+
+	// Удаляем кнопки, чтобы пользователь не мог нажать "Сыграть снова" во время новой игры
+	emptyComponents := []discordgo.MessageComponent{}
+	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    i.ChannelID,
+		ID:         i.Message.ID, // Используем ID текущего сообщения
+		Embed:      embed,
+		Components: &emptyComponents, // Убираем кнопки
+	})
 	if err != nil {
-		log.Printf("Failed to send RedBlack menu: %v", err)
+		log.Printf("Failed to edit RB menu: %v", err)
+		_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Content: "❌ Ошибка! Игру не обновить! Император гневен! Проверь права бота! 😡",
+			Flags:   discordgo.MessageFlagsEphemeral,
+		})
+		if err != nil {
+			log.Printf("Failed to send followup message: %v", err)
+		}
 		return
 	}
+	log.Printf("RB embed edited successfully for player %s, message ID: %s", playerID, i.Message.ID)
 
+	// Обновляем MenuMessageID
 	r.mu.Lock()
-	game.MenuMessageID = msg.ID
+	game.MenuMessageID = i.Message.ID // ID сообщения не меняется, но обновляем для консистентности
 	r.mu.Unlock()
 
-	// Отвечаем на взаимодействие
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredMessageUpdate,
-	})
+	// Запускаем таймер для отключения игры через 15 минут
+	go func(messageID string, channelID string) {
+		time.Sleep(15 * time.Minute)
+		r.mu.Lock()
+		if g, exists := r.redBlackGames[newGameID]; exists && g.Active {
+			g.Active = false
+			delete(r.redBlackGames, newGameID)
+			timeoutEmbed := &discordgo.MessageEmbed{
+				Title:       "🎰 Игра: Красный-Чёрный",
+				Description: fmt.Sprintf("Игра закончи, <@%s>! Время нету. ⏰\nИмператор недоволен! 😡", playerID),
+				Color:       newColor,
+				Footer: &discordgo.MessageEmbedFooter{
+					Text: "Время вышло! Император гневен! ⏰",
+				},
+			}
+			_, err := s.ChannelMessageEditEmbed(channelID, messageID, timeoutEmbed)
+			if err != nil {
+				log.Printf("Failed to update RB message on timeout: %v", err)
+			}
+		}
+		r.mu.Unlock()
+	}(i.Message.ID, i.ChannelID)
 }
 
 func (r *Ranking) HandleEndBlackjackCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Processing !endblackjack: %s from %s", command, m.Author.ID)
 
 	if !r.IsAdmin(m.Author.ID) {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут завершать игры!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут завершать игры! 🔒")
 		return
 	}
 
@@ -1145,29 +1295,37 @@ func (r *Ranking) HandleEndBlackjackCommand(s *discordgo.Session, m *discordgo.M
 	targetID = strings.TrimPrefix(targetID, "!")
 
 	r.mu.Lock()
-	game, exists := r.blackjackGames[targetID]
-	if !exists || !game.Active {
-		s.ChannelMessageSend(m.ChannelID, "❌ У этого пользователя нет активной игры в блэкджек!")
+	var game *BlackjackGame
+	for _, g := range r.blackjackGames {
+		if g.PlayerID == targetID && g.Active {
+			game = g
+			break
+		}
+	}
+	if game == nil {
+		s.ChannelMessageSend(m.ChannelID, "❌ У этого пользователя нет активной игры в блэкджек! ♠️")
 		r.mu.Unlock()
 		return
 	}
 
 	game.Active = false
+	// Удаляем игру из blackjackGames
+	delete(r.blackjackGames, game.GameID)
 	// Удаляем кнопки
 	emptyComponents := []discordgo.MessageComponent{}
 	emptyComponentsPtr := &emptyComponents
 	_, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    m.ChannelID,
-		ID:         game.GameMessageID,
-		Embed:      &discordgo.MessageEmbed{Title: "♠️ Блэкджек", Description: fmt.Sprintf("Игра завершена админом: <@%s>!", targetID), Color: 0xFFD700},
-		Components: emptyComponentsPtr, // Исправлено: передаём указатель на слайс
+		ID:         game.MenuMessageID,
+		Embed:      &discordgo.MessageEmbed{Title: "♠️ Блэкджек 🎲", Description: fmt.Sprintf("Игра завершена админом: <@%s>! 🚫", targetID), Color: 0xFFD700, Footer: &discordgo.MessageEmbedFooter{Text: "Игра завершена! ⏹️"}},
+		Components: emptyComponentsPtr,
 	})
 	if err != nil {
 		log.Printf("Failed to remove buttons on admin end: %v", err)
 	}
 	r.mu.Unlock()
 
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("♠️ Игра в блэкджек для <@%s> завершена! Ставка не возвращена.", targetID))
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("♠️ Игра в блэкджек для <@%s> завершена! Ставка не возвращена. 💸", targetID))
 	log.Printf("Blackjack game for %s ended by admin %s", targetID, m.Author.ID)
 }
 
@@ -1199,13 +1357,13 @@ func (r *Ranking) HandleChinaGive(s *discordgo.Session, m *discordgo.MessageCrea
 
 	amount, err := strconv.Atoi(parts[3])
 	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом! 💸")
 		return
 	}
 
 	senderRating := r.GetRating(m.Author.ID)
 	if senderRating < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d", senderRating))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d 💰", senderRating))
 		return
 	}
 
@@ -1217,9 +1375,9 @@ func (r *Ranking) HandleChinaGive(s *discordgo.Session, m *discordgo.MessageCrea
 		reason = strings.Join(parts[4:], " ")
 	}
 
-	response := fmt.Sprintf("✅ <@%s> передал %d кредитов <@%s>!", m.Author.ID, amount, targetID)
+	response := fmt.Sprintf("✅ <@%s> передал %d кредитов <@%s>! 💸", m.Author.ID, amount, targetID)
 	if reason != "" {
-		response += fmt.Sprintf(" | Причина: %s", reason)
+		response += fmt.Sprintf(" | 📜 Причина: %s", reason)
 	}
 	s.ChannelMessageSend(m.ChannelID, response)
 	log.Printf("User %s gave %d credits to %s. Reason: %s", m.Author.ID, amount, targetID, reason)
@@ -1239,7 +1397,7 @@ func (r *Ranking) HandleChinaRating(s *discordgo.Session, m *discordgo.MessageCr
 	targetID = strings.TrimPrefix(targetID, "!")
 
 	rating := r.GetRating(targetID)
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("💰 Рейтинг <@%s>: %d кредитов", targetID, rating))
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("💰 Рейтинг <@%s>: %d кредитов 📈", targetID, rating))
 	log.Printf("Rating for %s requested by %s: %d", targetID, m.Author.ID, rating)
 }
 
@@ -1248,7 +1406,7 @@ func (r *Ranking) HandleClearCoinsCommand(s *discordgo.Session, m *discordgo.Mes
 	log.Printf("Processing !china clear coins: %s from %s", m.Content, m.Author.ID)
 
 	if !r.IsAdmin(m.Author.ID) {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут очищать кредиты!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут очищать кредиты! 🔒")
 		return
 	}
 
@@ -1256,7 +1414,7 @@ func (r *Ranking) HandleClearCoinsCommand(s *discordgo.Session, m *discordgo.Mes
 	keys, err := r.redis.Keys(r.ctx, "user:*").Result()
 	if err != nil {
 		log.Printf("Failed to get user keys from Redis: %v", err)
-		s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при очистке кредитов!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при очистке кредитов! 🚫")
 		return
 	}
 
@@ -1264,7 +1422,7 @@ func (r *Ranking) HandleClearCoinsCommand(s *discordgo.Session, m *discordgo.Mes
 		r.redis.Del(r.ctx, key)
 	}
 
-	s.ChannelMessageSend(m.ChannelID, "✅ Все кредиты обнулены!")
+	s.ChannelMessageSend(m.ChannelID, "✅ Все кредиты обнулены! 🧹")
 	log.Printf("All credits cleared by %s", m.Author.ID)
 }
 
@@ -1273,7 +1431,7 @@ func (r *Ranking) HandleGiftAllCommand(s *discordgo.Session, m *discordgo.Messag
 	log.Printf("Processing !china gift all: %s from %s", command, m.Author.ID)
 
 	if !r.IsAdmin(m.Author.ID) {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут раздавать кредиты!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут раздавать кредиты! 🔒")
 		return
 	}
 
@@ -1285,7 +1443,7 @@ func (r *Ranking) HandleGiftAllCommand(s *discordgo.Session, m *discordgo.Messag
 
 	amount, err := strconv.Atoi(parts[3])
 	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть положительным числом! 💸")
 		return
 	}
 
@@ -1293,7 +1451,7 @@ func (r *Ranking) HandleGiftAllCommand(s *discordgo.Session, m *discordgo.Messag
 	keys, err := r.redis.Keys(r.ctx, "user:*").Result()
 	if err != nil {
 		log.Printf("Failed to get user keys from Redis: %v", err)
-		s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при раздаче кредитов!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при раздаче кредитов! 🚫")
 		return
 	}
 
@@ -1302,7 +1460,7 @@ func (r *Ranking) HandleGiftAllCommand(s *discordgo.Session, m *discordgo.Messag
 		r.UpdateRating(userID, amount)
 	}
 
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ Каждый получил %d кредитов!", amount))
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ Каждый получил %d кредитов! 🎁", amount))
 	log.Printf("Admin %s gifted %d credits to all users", m.Author.ID, amount)
 }
 
@@ -1316,7 +1474,7 @@ func (r *Ranking) HandleAdminGive(s *discordgo.Session, m *discordgo.MessageCrea
 	}
 
 	if !r.IsAdmin(m.Author.ID) {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут это делать!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут это делать! 🔒")
 		return
 	}
 
@@ -1326,7 +1484,7 @@ func (r *Ranking) HandleAdminGive(s *discordgo.Session, m *discordgo.MessageCrea
 
 	amount, err := strconv.Atoi(parts[3])
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть числом!")
+		s.ChannelMessageSend(m.ChannelID, "❌ Сумма должна быть числом! 💸")
 		return
 	}
 
@@ -1342,9 +1500,9 @@ func (r *Ranking) HandleAdminGive(s *discordgo.Session, m *discordgo.MessageCrea
 		verb = "понизил"
 		amount = -amount
 	}
-	response := fmt.Sprintf("✅ Админ <@%s> %s рейтинг <@%s> на %d кредитов!", m.Author.ID, verb, targetID, amount)
+	response := fmt.Sprintf("✅ Админ <@%s> %s рейтинг <@%s> на %d кредитов! ⚙️", m.Author.ID, verb, targetID, amount)
 	if reason != "" {
-		response += fmt.Sprintf(" | Причина: %s", reason)
+		response += fmt.Sprintf(" | 📜 Причина: %s", reason)
 	}
 	s.ChannelMessageSend(m.ChannelID, response)
 	log.Printf("Admin %s changed rating of %s by %d. Reason: %s", m.Author.ID, targetID, amount, reason)
@@ -1354,20 +1512,20 @@ func (r *Ranking) HandleHelpCommand(s *discordgo.Session, m *discordgo.MessageCr
 	log.Printf("Processing !chelp: %s from %s", m.Content, m.Author.ID)
 
 	response := "📜 **Команды бота:**\n" +
-		"**!cpoll Вопрос [Вариант1] [Вариант2] ...** - (Админ) Создать опрос\n" +
-		"**!dep <ID_опроса> <номер_варианта> <сумма>** - Сделать ставку\n" +
-		"**!closedep <ID_опроса> <номер>** - (Админ) Закрыть опрос\n" +
-		"**!polls** - Показать активные опросы и ставки\n" +
-		"**!redblack** - Начать игру в Красное-Чёрное\n" +
-		"**!blackjack** - Начать игру в блэкджек\n" +
-		"**!endblackjack @id** - (Админ) Завершить игру в блэкджек\n" +
-		"**!china give @id <сумма> [причина]** - Передать кредиты\n" +
-		"**!china rating @id** - Проверить рейтинг\n" +
-		"**!china clear coins** - (Админ) Обнулить кредиты у всех\n" +
-		"**!china gift all <сумма>** - (Админ) Раздать кредиты всем\n" +
-		"**!admin give @id <сумма> [причина]** - (Админ) Выдать/забрать кредиты\n" +
-		"**!chelp** - Показать помощь\n" +
-		"**!top5** - Топ-5 по рейтингу"
+		"🎉 **!cpoll Вопрос [Вариант1] [Вариант2] ...** - (Админ) Создать опрос\n" +
+		"💸 **!dep <ID_опроса> <номер_варианта> <сумма>** - Сделать ставку\n" +
+		"🔒 **!closedep <ID_опроса> <номер>** - (Админ) Закрыть опрос\n" +
+		"📊 **!polls** - Показать активные опросы и ставки\n" +
+		"🎰 **!rb** - Начать игру в Красное-Чёрное\n" + // Изменено с "!double" на "!rb"
+		"♠️ **!blackjack** - Начать игру в блэкджек\n" +
+		"🚫 **!endblackjack @id** - (Админ) Завершить игру в блэкджек\n" +
+		"💰 **!china give @id <сумма> [причина]** - Передать кредиты\n" +
+		"📈 **!china rating @id** - Проверить рейтинг\n" +
+		"🧹 **!china clear coins** - (Админ) Обнулить кредиты у всех\n" +
+		"🎁 **!china gift all <сумма>** - (Админ) Раздать кредиты всем\n" +
+		"⚙️ **!admin give @id <сумма> [причина]** - (Админ) Выдать/забрать кредиты\n" +
+		"❓ **!chelp** - Показать помощь\n" +
+		"🏆 **!top5** - Топ-5 по рейтингу"
 	s.ChannelMessageSend(m.ChannelID, response)
 	log.Printf("Help sent to %s", m.Author.ID)
 }
