@@ -84,11 +84,21 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID string) (*Ranking, erro
 		floodChannelID: floodChannelID,
 	}
 
-	r.redis = redis.NewClient(&redis.Options{
-		Addr: redisAddr,
-	})
-	if _, err := r.redis.Ping(r.ctx).Result(); err != nil {
-		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
+	// Пытаемся подключиться к Redis с повторными попытками
+	var err error
+	for i := 0; i < 5; i++ {
+		r.redis = redis.NewClient(&redis.Options{
+			Addr: redisAddr,
+		})
+		_, err = r.redis.Ping(r.ctx).Result()
+		if err == nil {
+			break
+		}
+		log.Printf("Failed to connect to Redis (attempt %d/5): %v", i+1, err)
+		time.Sleep(5 * time.Second)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis after 5 attempts: %v", err)
 	}
 
 	file, err := os.Open(adminFilePath)
@@ -112,34 +122,44 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID string) (*Ranking, erro
 }
 
 func (r *Ranking) GetRating(userID string) int {
-	data, err := r.redis.Get(r.ctx, "user:"+userID).Result()
-	if err == redis.Nil {
-		return 0
+	for i := 0; i < 3; i++ {
+		data, err := r.redis.Get(r.ctx, "user:"+userID).Result()
+		if err == redis.Nil {
+			return 0
+		}
+		if err != nil {
+			log.Printf("Failed to get rating for %s from Redis (attempt %d/3): %v", userID, i+1, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		var user User
+		if err := json.Unmarshal([]byte(data), &user); err != nil {
+			log.Printf("Failed to unmarshal user %s: %v", userID, err)
+			return 0
+		}
+		return user.Rating
 	}
-	if err != nil {
-		log.Printf("Failed to get rating for %s from Redis: %v", userID, err)
-		return 0
-	}
-
-	var user User
-	if err := json.Unmarshal([]byte(data), &user); err != nil {
-		log.Printf("Failed to unmarshal user %s: %v", userID, err)
-		return 0
-	}
-	return user.Rating
+	log.Printf("Failed to get rating for %s after 3 attempts", userID)
+	return 0
 }
 
 func (r *Ranking) UpdateRating(userID string, points int) {
-	data, err := r.redis.Get(r.ctx, "user:"+userID).Result()
+	// Получаем текущий рейтинг
 	user := User{ID: userID, Rating: 0}
-	if err == nil {
-		if err := json.Unmarshal([]byte(data), &user); err != nil {
-			log.Printf("Failed to unmarshal user %s: %v", userID, err)
-			return
+	for i := 0; i < 3; i++ {
+		data, err := r.redis.Get(r.ctx, "user:"+userID).Result()
+		if err == nil {
+			if err := json.Unmarshal([]byte(data), &user); err != nil {
+				log.Printf("Failed to unmarshal user %s: %v", userID, err)
+				return
+			}
+			break
+		} else if err == redis.Nil {
+			break
+		} else {
+			log.Printf("Failed to get user %s from Redis (attempt %d/3): %v", userID, i+1, err)
+			time.Sleep(1 * time.Second)
 		}
-	} else if err != redis.Nil {
-		log.Printf("Failed to get user %s from Redis: %v", userID, err)
-		return
 	}
 
 	user.Rating += points
@@ -147,16 +167,30 @@ func (r *Ranking) UpdateRating(userID string, points int) {
 		user.Rating = 0
 	}
 
+	// Сохраняем обновлённый рейтинг
 	dataBytes, err := json.Marshal(user)
 	if err != nil {
 		log.Printf("Failed to marshal user %s: %v", userID, err)
 		return
 	}
 
-	if err := r.redis.Set(r.ctx, "user:"+userID, dataBytes, 0).Err(); err != nil {
-		log.Printf("Failed to save user %s to Redis: %v", userID, err)
+	for i := 0; i < 3; i++ {
+		if err := r.redis.Set(r.ctx, "user:"+userID, dataBytes, 0).Err(); err != nil {
+			log.Printf("Failed to save user %s to Redis (attempt %d/3): %v", userID, i+1, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		log.Printf("Updated rating for %s: %d (change: %d)", userID, user.Rating, points)
+		return
 	}
-	log.Printf("Updated rating for %s: %d (change: %d)", userID, user.Rating, points)
+	log.Printf("Failed to save user %s to Redis after 3 attempts", userID)
+	// Уведомляем в floodChannelID
+	if r.floodChannelID != "" {
+		s, err := discordgo.New("Bot " + os.Getenv("DISCORD_TOKEN"))
+		if err == nil {
+			s.ChannelMessageSend(r.floodChannelID, "❌ Ошибка: Не удалось сохранить рейтинг в Redis после 3 попыток! Проверьте Redis-сервер.")
+		}
+	}
 }
 
 func (r *Ranking) GetTop5() []User {
@@ -1570,14 +1604,14 @@ func splitCommand(command string) []string {
 
 func (r *Ranking) TrackVoiceActivity(s *discordgo.Session) {
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 
 		for range ticker.C {
 			r.mu.Lock()
 			now := int(time.Now().Unix())
 			for userID, lastTime := range r.voiceAct {
-				if now-lastTime >= 300 {
+				if now-lastTime >= 60 {
 					guilds, err := s.UserGuilds(100, "", "", false)
 					if err != nil {
 						log.Printf("Error getting guilds for %s: %v", userID, err)
@@ -1600,7 +1634,7 @@ func (r *Ranking) TrackVoiceActivity(s *discordgo.Session) {
 						}
 					}
 					if inChannel {
-						r.UpdateRating(userID, 5)
+						r.UpdateRating(userID, 1)
 						r.voiceAct[userID] = now
 						log.Printf("User %s earned 5 credits for voice activity", userID)
 					} else {
