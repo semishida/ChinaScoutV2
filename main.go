@@ -21,7 +21,7 @@ func main() {
 	relayChannelID := os.Getenv("RELAY_CHANNEL_ID")
 	adminFilePath := os.Getenv("ADMIN_FILE_PATH")
 	redisAddr := os.Getenv("REDIS_ADDR")
-	telegramChatID := os.Getenv("TELEGRAM_CHAT_ID") // Добавляем ID чата Telegram
+	telegramChatID := os.Getenv("TELEGRAM_CHAT_ID")
 
 	if discordToken == "" {
 		log.Fatal("DISCORD_TOKEN is not set")

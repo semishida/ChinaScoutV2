@@ -17,7 +17,9 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 	}
 
 	dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentMessageContent | discordgo.IntentsGuildVoiceStates
-	rank.TrackVoiceActivity(dg)
+
+	// Регистрируем обработчик голосовой активности
+	dg.AddHandler(rank.TrackVoiceActivity)
 
 	for i := 0; i < 5; i++ {
 		err = dg.Open()

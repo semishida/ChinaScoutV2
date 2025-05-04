@@ -82,7 +82,7 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Type == discordgo.InteractionMessageComponent {
 			customID := i.MessageComponentData().CustomID
-			log.Printf("Interaction received, CustomID: %s, ChannelID: %s, UserID: %s", customID, i.ChannelID, i.Member.User.ID) // Лог для отладки
+			log.Printf("Interaction received, CustomID: %s, ChannelID: %s, UserID: %s", customID, i.ChannelID, i.Member.User.ID)
 			switch {
 			case strings.HasPrefix(customID, "blackjack_hit_"):
 				log.Printf("Matched blackjack_hit_")
@@ -93,14 +93,17 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 			case strings.HasPrefix(customID, "blackjack_replay_"):
 				log.Printf("Matched blackjack_replay_")
 				rank.HandleBlackjackReplay(s, i)
-			case strings.HasPrefix(customID, "rb_replay_"): // Исправлено с "redblack_replay_" на "rb_replay_"
+			case strings.HasPrefix(customID, "rb_replay_"):
 				log.Printf("Matched rb_replay_, calling HandleRBReplay")
 				rank.HandleRBReplay(s, i)
+			case strings.HasPrefix(customID, "duel_accept_"):
+				log.Printf("Matched duel_accept_")
+				rank.HandleDuelAccept(s, i)
 			default:
-				log.Printf("No match for CustomID: %s", customID) // Лог для нераспознанных CustomID
+				log.Printf("No match for CustomID: %s", customID)
 			}
 		} else {
-			log.Printf("Received non-component interaction: %v", i.Type) // Лог для других типов взаимодействий
+			log.Printf("Received non-component interaction: %v", i.Type)
 		}
 	})
 
@@ -248,7 +251,7 @@ func handleTelegramUpdates(bot *tgbotapi.BotAPI, chatID int64, dg *discordgo.Ses
 }
 
 func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *ranking.Ranking) {
-	command := strings.TrimSpace(strings.ToLower(m.Content)) // Добавляем TrimSpace для удаления пробелов
+	command := strings.TrimSpace(strings.ToLower(m.Content))
 	log.Printf("Processing command: %s", command)
 	switch {
 	case strings.HasPrefix(command, "!cpoll"):
@@ -260,30 +263,9 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!closedep"):
 		log.Printf("Matched !closedep")
 		rank.HandleCloseDepCommand(s, m, m.Content)
-	case strings.HasPrefix(command, "!china give"):
-		log.Printf("Matched !china give")
-		rank.HandleChinaGive(s, m, m.Content)
-	case strings.HasPrefix(command, "!china rating"):
-		log.Printf("Matched !china rating")
-		rank.HandleChinaRating(s, m, m.Content)
-	case strings.HasPrefix(command, "!admin give"):
-		log.Printf("Matched !admin give")
-		rank.HandleAdminGive(s, m, m.Content)
-	case strings.HasPrefix(command, "!chelp"):
-		log.Printf("Matched !chelp")
-		rank.HandleHelpCommand(s, m)
-	case command == "!top5":
-		log.Printf("Matched !top5")
-		topUsers := rank.GetTop5()
-		if len(topUsers) == 0 {
-			s.ChannelMessageSend(m.ChannelID, "🏆 Топ-5 пуст!")
-			return
-		}
-		response := "🏆 **Топ-5 по рейтингу:**\n"
-		for i, user := range topUsers {
-			response += fmt.Sprintf("%d. <@%s> - %d кредитов\n", i+1, user.ID, user.Rating)
-		}
-		s.ChannelMessageSend(m.ChannelID, response)
+	case command == "!top5" || command == "!top":
+		log.Printf("Matched !top")
+		rank.HandleTopCommand(s, m)
 	case command == "!polls":
 		log.Printf("Matched !polls")
 		rank.HandlePollsCommand(s, m)
@@ -302,12 +284,24 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!endblackjack"):
 		log.Printf("Matched !endblackjack")
 		rank.HandleEndBlackjackCommand(s, m, m.Content)
-	case command == "!china clear coins":
-		log.Printf("Matched !china clear coins")
-		rank.HandleClearCoinsCommand(s, m)
-	case strings.HasPrefix(command, "!china gift all"):
-		log.Printf("Matched !china gift all")
-		rank.HandleGiftAllCommand(s, m, m.Content)
+	case strings.HasPrefix(command, "!duel"):
+		log.Printf("Matched !duel")
+		rank.HandleDuelCommand(s, m, m.Content)
+	case command == "!stats":
+		log.Printf("Matched !stats")
+		rank.HandleStatsCommand(s, m)
+	case strings.HasPrefix(command, "!adminmass"):
+		log.Printf("Matched !adminmass")
+		rank.HandleAdminMassCommand(s, m, m.Content)
+	case strings.HasPrefix(command, "!admin"):
+		log.Printf("Matched !admin")
+		rank.HandleAdminCommand(s, m, m.Content)
+	case command == "!chelp":
+		log.Printf("Matched !chelp")
+		rank.HandleChelpCommand(s, m)
+	case command == "!china":
+		log.Printf("Matched !china")
+		rank.HandleChinaCommand(s, m)
 	default:
 		log.Printf("No match for command: %s", command)
 	}
