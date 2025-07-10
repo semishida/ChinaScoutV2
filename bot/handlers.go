@@ -38,7 +38,7 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 			if m.Content != "" && len(m.Attachments) == 0 {
 				escapedContent := utils.EscapeMarkdownV2(m.Content)
 				escapedUsername := utils.EscapeMarkdownV2(m.Author.Username)
-				msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("🎧:\n*%s*: %s", escapedUsername, escapedContent))
+				msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("\n*%s*: %s", escapedUsername, escapedContent))
 				msg.ParseMode = "MarkdownV2"
 				if _, err := tgBot.Send(msg); err != nil {
 					log.Printf("Failed to send message to Telegram: %v", err)
@@ -48,9 +48,9 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 			// Вложения
 			if len(m.Attachments) > 0 {
 				for _, attachment := range m.Attachments {
-					caption := fmt.Sprintf("🎧:\n%s:", m.Author.Username)
+					caption := fmt.Sprintf("\n%s:", m.Author.Username)
 					if m.Content != "" {
-						caption = fmt.Sprintf("🎧:\n%s: %s", m.Author.Username, m.Content)
+						caption = fmt.Sprintf("%n%s: %s", m.Author.Username, m.Content)
 					}
 
 					filePath := fmt.Sprintf("content/file_%d_%s", time.Now().UnixNano(), attachment.Filename)
