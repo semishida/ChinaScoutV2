@@ -287,7 +287,7 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!duel"):
 		log.Printf("Matched !duel")
 		rank.HandleDuelCommand(s, m, m.Content)
-	case command == "!stats":
+	case strings.HasPrefix(command, "!stats"):
 		log.Printf("Matched !stats")
 		rank.HandleStatsCommand(s, m)
 	case strings.HasPrefix(command, "!adminmass"):
@@ -302,6 +302,9 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case command == "!china":
 		log.Printf("Matched !china")
 		rank.HandleChinaCommand(s, m)
+	case strings.HasPrefix(command, "!transfer"):
+		log.Printf("Matched !transfer")
+		rank.HandleTransferCommand(s, m, m.Content)
 	default:
 		log.Printf("No match for command: %s", command)
 	}

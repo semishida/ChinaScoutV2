@@ -3,6 +3,7 @@ package ranking
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"log"
 	"strconv"
 	"strings"
@@ -47,6 +48,62 @@ func isValidUserID(id string) bool {
 	}
 	_, err := strconv.ParseUint(id, 10, 64)
 	return err == nil
+}
+
+func (r *Ranking) HandleTransferCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
+	log.Printf("Обработка перевода: %s от %s", command, m.Author.ID)
+
+	parts := strings.Fields(command)
+	if len(parts) < 3 {
+		s.ChannelMessageSend(m.ChannelID, "Ебанат! Используй `!transfer @id сумма [причина, если есть]`")
+		return
+	}
+
+	targetID := strings.TrimPrefix(parts[1], "<@")
+	targetID = strings.TrimPrefix(targetID, ">")
+	targetID = strings.TrimSuffix(targetID, "!")
+
+	if targetID == m.Author.ID {
+		s.ChannelMessageSend(m.ChannelID, "Ты баги ищешь? За щекой у себя поищи! Самому себе можно отсосать, а не перевести кредиты")
+		return
+	}
+
+	if !isValidUserID(targetID) {
+		s.ChannelMessageSend(m.ChannelID, "Не, я почему-то не могу найти этот ID, он некорректен? Используй `!transfer @id сумма [причина, если есть]`")
+	}
+
+	amount, err := strconv.Atoi(parts[2])
+	if err != nil || amount <= 0 {
+		s.ChannelMessageSend(m.ChannelID, "Сумма должна быть положительным числом!")
+		return
+	}
+
+	userRating := r.GetRating(m.Author.ID)
+	if userRating < amount {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов! Твой баланс: %d", userRating))
+		return
+	}
+
+	reason := ""
+	if len(parts) > 3 {
+		reason = strings.Join(parts[3:], " ")
+	}
+
+	r.UpdateRating(m.Author.ID, -amount)
+	r.UpdateRating(targetID, amount)
+
+	targetUsername, err := getUsername(s, targetID)
+	if err != nil {
+		targetUsername = "<@" + targetID + ">"
+	}
+
+	msg := fmt.Sprintf("✅ <%s> передал %d соцкредитов пользователю %s!", m.Author.ID, amount, targetUsername)
+	if reason != "" {
+		msg += fmt.Sprintf("\n 🗒️ Причина: %s", reason)
+	}
+	s.ChannelMessageSend(m.ChannelID, msg)
+	r.LogCreditOperation(s, fmt.Sprintf("<%s> передает %d соцкредитов пользователю <@%s>%s", m.Author.ID, amount, targetID, formatReason(reason)))
+	log.Printf("Пользователь %s передал %d кредитов %s (Причина: %s)", m.Author.ID, amount, targetID, reason)
 }
 
 // HandleTopCommand обрабатывает команду !top.
@@ -147,6 +204,118 @@ func (r *Ranking) HandleAdminCommand(s *discordgo.Session, m *discordgo.MessageC
 	log.Printf("Админ %s изменил рейтинг %s на %d (причина: %s)", m.Author.ID, targetID, amount, reason)
 }
 
+//func (r *Ranking) HandleAdminStatsCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
+//	log.Printf("Обработка !adminstats: %s от %s", command, m.Author.ID)
+//
+//	if m.ChannelID != r.logChannelID {
+//		s.ChannelMessageSend(m.ChannelID, "Команда !adminstats доступна только в канале для логирования!")
+//		return
+//	}
+//
+//	if !r.IsAdmin(m.Author.ID) {
+//		s.ChannelMessageSend(m.ChannelID, "Только админы могут вмешиваться в порядок дел. Боги не просто так считали статистику, чтобы смертные в неё лезли!")
+//		return
+//	}
+//
+//	parts := strings.Fields(command)
+//	if len(parts) != 5 {
+//		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!adminstats @id <игра> <поле> <значение>`\nПример: `!adminstats @123456789 duel played 10`\nИгры: duel, rb, bj, voice\nПоля: played, won (для игр), seconds (для voice)")
+//		return
+//	}
+//
+//	targetID := strings.TrimPrefix(parts[1], "<@")
+//	targetID = strings.TrimSuffix(targetID, ">")
+//	targetID = strings.TrimPrefix(targetID, "!")
+//
+//	if !isValidUserID(targetID) {
+//		s.ChannelMessageSend(m.ChannelID, "❌ Некорректный ID пользователя! Используй: `!adminstats @id <игра> <поле> <значение>`\nПример: `!adminstats @123456789 duel played 10`\nИгры: duel, rb, bj, voice\nПоля: played, won (для игр), seconds (для voice) ")
+//		return
+//	}
+//	game := strings.ToLower(parts[2])
+//	if game != "duel" && game != "rb" && game != "bj" && game != "voice" {
+//		s.ChannelMessageSend(m.ChannelID, "❌ Игра должна быть: duel, rb, bj или voice!")
+//		return
+//	}
+//
+//	field := strings.ToLower(parts[3])
+//	if (game != "voice" && field != "played" && field != "won") || (game == "voice" && field != "seconds") {
+//		s.ChannelMessageSend(m.ChannelID, "❌ Поле должно быть: played или won (для duel, rb, bj), seconds (для voice)!")
+//		return
+//	}
+//
+//	value, err := strconv.Atoi(parts[4])
+//	if err != nil || value < 0 {
+//		s.ChannelMessageSend(m.ChannelID, "❌ Значение должно быть неотрицательным числом!")
+//		return
+//	}
+//
+//	user := User{ID: targetID}
+//	for i := 0; i < 3; i++ {
+//		data, err := r.redis.Get(r.ctx, "user:"+targetID).Result()
+//		if err != nil {
+//			if err := json.Unmarshal([]byte(data), &user); err != nil {
+//				log.Printf("Не удалось разобрать данные пользователя %s: %v", targetID, err)
+//				s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при загрузке данных пользователя!")
+//				return
+//			}
+//			break
+//		} else if err == redis.Nil {
+//			break
+//		} else {
+//			log.Printf("Не удалось получить данные пользователя %s из Редиса (попытка %d/3): %v", targetID, i+1, err)
+//			time.Sleep(1 * time.Second)
+//		}
+//	}
+//
+//	switch game {
+//	case "duel":
+//		if field == "played" {
+//			user.DuelsPlayed = value
+//		} else if field == "won" {
+//			user.DuelsWon = value
+//		}
+//	case "rb":
+//		if field == "played" {
+//			user.RBPlayed = value
+//		} else if field == "won" {
+//			user.RBWon = value
+//		}
+//	case "bj":
+//		if field == "played" {
+//			user.BJPlayed = value
+//		} else if field == "won" {
+//			user.BJWon = value
+//		}
+//	case "voice":
+//		user.VoiceSeconds = value
+//	}
+//
+//	dataBytes, err := json.Marshal(user)
+//	if err != nil {
+//		log.Printf("Не удалось сериализовать данные пользователя %s: %v", targetID, err)
+//		s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при сохранении данных!")
+//		return
+//	}
+//
+//	for i := 0; i < 3; i++ {
+//		if err := r.redis.Set(r.ctx, "user:"+targetID, dataBytes, 0).Err(); err != nil {
+//			log.Printf("Не удалось созранить данные пользователя %s в Редис (попытка %d/3): %v", targetID, i+1, err)
+//			time.Sleep(1 * time.Second)
+//			continue
+//		}
+//		targetUsername, err := getUsername(s, targetID)
+//		if err != nil {
+//			targetUsername = "<@" + targetID + ">"
+//		}
+//		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ Статистика пользователя %s обновлена: %s.%s = %d", targetUsername, game, field, value))
+//		r.LogCreditOperation(s, fmt.Sprintf("Админ <@%s> изменил статистику %s: %s.%s = %d", m.Author.ID, targetUsername, game, field, value))
+//		log.Printf("Админ %s изменил статистику %s: %s.%s = %d", m.Author.ID, targetID, game, field, value)
+//		return
+//	}
+//	log.Printf("Не удалось сохранить данные пользователя %s в Redis после 3 попыток", targetID)
+//	s.ChannelMessageSend(m.ChannelID, "❌ Ошибка: Не удалось сохранить данные в Redis после 3 попыток! Проверьте Redis-сервер.")
+//}
+
 // HandleAdminMassCommand обрабатывает команду !adminmass.
 func (r *Ranking) HandleAdminMassCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Обработка !adminmass: %s от %s", command, m.Author.ID)
@@ -234,16 +403,44 @@ func formatReason(reason string) string {
 func (r *Ranking) HandleStatsCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	log.Printf("Обработка !stats от %s", m.Author.ID)
 
-	user := User{ID: m.Author.ID}
-	data, err := r.redis.Get(r.ctx, "user:"+m.Author.ID).Result()
-	if err == nil {
-		if err := json.Unmarshal([]byte(data), &user); err != nil {
-			log.Printf("Не удалось разобрать данные пользователя %s: %v", m.Author.ID, err)
+	parts := strings.Fields(m.Content)
+	targetID := m.Author.ID
+	targetUsername := m.Author.Username
+
+	if len(parts) > 1 {
+		targetID = strings.TrimPrefix(parts[1], "<@")
+		targetID = strings.TrimSuffix(targetID, ">")
+		targetID = strings.TrimPrefix(targetID, "!")
+		if !isValidUserID(targetID) {
+			s.ChannelMessageSend(m.ChannelID, "❌ Некорректный ID пользователя! Используй: `!stats [@id]`")
+			return
+		}
+		var err error
+		targetUsername, err = getUsername(s, targetID)
+		if err != nil {
+			targetUsername = "<@" + targetID + ">"
 		}
 	}
 
+	user := User{ID: targetID}
+	data, err := r.redis.Get(r.ctx, "user:"+targetID).Result()
+	if err == redis.Nil {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ У пользователя %s нет статистики! 😢", targetUsername))
+		return
+	} else if err != nil {
+		log.Printf("Не удалось получить данные пользователя %s из Redis: %v", targetID, err)
+		s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при загрузке статистики! Проверьте Redis-сервер.")
+		return
+	}
+
+	if err := json.Unmarshal([]byte(data), &user); err != nil {
+		log.Printf("Не удалось разобрать данные пользователя %s: %v", targetID, err)
+		s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при обработке данных пользователя!")
+		return
+	}
+
 	embed := &discordgo.MessageEmbed{
-		Title:       fmt.Sprintf("📊 Статистика %s", m.Author.Username),
+		Title:       fmt.Sprintf("📊 Статистика %s", targetUsername),
 		Description: "Твои достижения в мире соцкредитов! 🌟",
 		Color:       0xFFD700, // Золотой цвет
 		Thumbnail: &discordgo.MessageEmbedThumbnail{
@@ -261,7 +458,7 @@ func (r *Ranking) HandleStatsCommand(s *discordgo.Session, m *discordgo.MessageC
 				Inline: true,
 			},
 			{
-				Name:   "🔴⚫ RedBlack",
+				Name:   "🔴⚫️ RedBlack",
 				Value:  fmt.Sprintf("Сыграно: **%d**\nПобед: **%d**", user.RBPlayed, user.RBWon),
 				Inline: true,
 			},
@@ -271,7 +468,7 @@ func (r *Ranking) HandleStatsCommand(s *discordgo.Session, m *discordgo.MessageC
 				Inline: true,
 			},
 			{
-				Name:   "🎙️ Время в голосовых каналах",
+				Name:   "🎙 Время в голосовых каналах",
 				Value:  fmt.Sprintf("**%s**", formatTime(user.VoiceSeconds)),
 				Inline: false,
 			},
@@ -296,9 +493,11 @@ func (r *Ranking) HandleChelpCommand(s *discordgo.Session, m *discordgo.MessageC
 			URL: "https://i.imgur.com/your-bot-icon.png", // Замени на иконку бота
 		},
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "💰 !china [@id]", Value: "Узнай свой баланс или баланс другого игрока (Для других пока ограничено, посмотреть нельзя).", Inline: false},
+			{Name: "💰 !china [@id]", Value: "Узнай свой баланс или баланс другого игрока.", Inline: false},
 			{Name: "🏆 !top", Value: "Посмотри топ-5 пользователей по кредитам.", Inline: false},
 			{Name: "📊 !stats", Value: "Проверь свою статистику: кредиты, игры, время в голосовых каналах.", Inline: false},
+			{Name: "📊 !adminstats @id <игра> <поле> <значение>", Value: "Измените статистику игрока (только админы).", Inline: false},
+			{Name: "📜 !transfer @id <сумма> <причина>", Value: "Передать кредиты другому", Inline: false},
 			{Name: "📝 !cpoll Вопрос [Вариант1] [Вариант2] ...", Value: "Создай опрос (только админы).", Inline: false},
 			{Name: "💸 !dep <ID_опроса> <номер_варианта> <сумма>", Value: "Поставь кредиты на вариант в опросе.", Inline: false},
 			{Name: "🔒 !closedep <ID_опроса> <номер>", Value: "Закрой опрос и распредели выигрыши (только админы).", Inline: false},
