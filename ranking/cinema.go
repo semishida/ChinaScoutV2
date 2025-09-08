@@ -783,7 +783,8 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 	log.Printf("Длина описания embed: %d символов", len(embed.Description))
 	if len(embed.Description) > 2000 {
 		log.Printf("Разбиение длинного сообщения")
-		parts, err := splitLongMessage(embed.Description, 1900)
+		err := splitLongMessage(embed.Description, 1900)
+		parts := strings.Split(embed.Description, "\n")
 		if err != nil {
 			log.Printf("Ошибка разбиения сообщения для !cinemalist: %v", err)
 			embed := &discordgo.MessageEmbed{
@@ -883,7 +884,7 @@ func (r *Ranking) HandleAdminCinemaListCommand(s *discordgo.Session, m *discordg
 
 	// Если таблица слишком длинная, разбиваем на части
 	if len(embed.Description) > 2000 {
-		parts, _ := splitLongMessage(embed.Description, 1900)
+		parts := splitLongMessage(embed.Description, 1900)
 		for i, part := range parts {
 			partEmbed := &discordgo.MessageEmbed{
 				Title:       "🎥 Детальный список фильмов" + fmt.Sprintf(" (Часть %d)", i+1),
