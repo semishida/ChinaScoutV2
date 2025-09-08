@@ -115,11 +115,6 @@ func generateGameID(playerID string) string {
 	return fmt.Sprintf("%s-%d-%d", safePlayerID, time.Now().UnixNano(), rand.Intn(10000))
 }
 
-// randomColor возвращает случайный цвет в формате RGB.
-func randomColor() int {
-	return rand.Intn(0xFFFFFF)
-}
-
 // generatePollID создаёт уникальный 5-символьный ID для опроса.
 func generatePollID() string {
 	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

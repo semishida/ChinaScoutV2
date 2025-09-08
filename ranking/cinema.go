@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,24 +14,41 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-// CinemaOption представляет вариант фильма на аукционе.
+// CinemaOption represents a movie option in the auction.
 type CinemaOption struct {
 	Name  string         `json:"name"`
 	Total int            `json:"total"`
 	Bets  map[string]int `json:"bets"` // userID: amount
 }
 
-// PendingCinemaBid представляет pending ставку для подтверждения.
+// PendingCinemaBid represents a pending bid for confirmation.
 type PendingCinemaBid struct {
-	UserID    string
-	IsNew     bool
-	Name      string // для новых
-	Index     int    // для существующих (0-based)
-	Amount    int
-	MessageID string
+	UserID         string
+	IsNew          bool
+	Name           string // for new movies
+	Index          int    // for existing movies (0-based)
+	Amount         int
+	UserMessageID  string // ID of the message with buttons for the user
+	AdminMessageID string // ID of the message with buttons for admins
 }
 
-// LoadCinemaOptions загружает варианты аукциона из Redis.
+func randomColor() int {
+	colors := []int{0x1E90FF, 0x00FF00, 0xFFD700, 0xFF69B4, 0x00CED1}
+	return colors[rand.Intn(len(colors))]
+}
+
+func (r *Ranking) SaveCinemaOptions() error {
+	data, err := json.Marshal(r.cinemaOptions)
+	if err != nil {
+		return fmt.Errorf("failed to marshal cinemaOptions: %v", err)
+	}
+	err = r.redis.Set(r.ctx, "cinema_options", data, 0).Err()
+	if err != nil {
+		return fmt.Errorf("failed to save cinemaOptions to Redis: %v", err)
+	}
+	return nil
+}
+
 func (r *Ranking) LoadCinemaOptions() error {
 	data, err := r.redis.Get(r.ctx, "cinema_options").Result()
 	if err == redis.Nil {
@@ -46,406 +64,322 @@ func (r *Ranking) LoadCinemaOptions() error {
 	return nil
 }
 
-// SaveCinemaOptions сохраняет варианты аукциона в Redis.
-func (r *Ranking) SaveCinemaOptions() error {
-	data, err := json.Marshal(r.cinemaOptions)
-	if err != nil {
-		return fmt.Errorf("failed to marshal cinemaOptions: %v", err)
-	}
-	err = r.redis.Set(r.ctx, "cinema_options", data, 0).Err()
-	if err != nil {
-		return fmt.Errorf("failed to save cinemaOptions to Redis: %v", err)
-	}
-	return nil
-}
-
-// HandleMessageReactionAdd обрабатывает реакции на сообщения подтверждения ставок.
-func (r *Ranking) HandleMessageReactionAdd(s *discordgo.Session, rea *discordgo.MessageReactionAdd) {
-	if rea.UserID == s.State.User.ID {
-		return
-	}
-	if rea.Emoji.Name != "✅" && rea.Emoji.Name != "❌" {
-		return
-	}
-
-	r.mu.Lock()
-	bid, ok := r.pendingCinemaBids[rea.MessageID]
-	r.mu.Unlock()
-	if !ok {
-		return
-	}
-	if rea.UserID != bid.UserID {
-		return
-	}
-
-	if rea.Emoji.Name == "❌" {
-		r.mu.Lock()
-		delete(r.pendingCinemaBids, rea.MessageID)
-		r.mu.Unlock()
-		s.ChannelMessageEdit(rea.ChannelID, rea.MessageID, "Ставка отменена.")
-		return
-	}
-
-	// Подтверждение ✅
-	currentRating := r.GetRating(bid.UserID)
-	if currentRating < bid.Amount {
-		s.ChannelMessageEdit(rea.ChannelID, rea.MessageID, "Теперь недостаточно кредитов!")
-		r.mu.Lock()
-		delete(r.pendingCinemaBids, rea.MessageID)
-		r.mu.Unlock()
-		return
-	}
-
-	r.UpdateRating(bid.UserID, -bid.Amount)
-
-	r.mu.Lock()
-	var msg string
-	if bid.IsNew {
-		option := CinemaOption{
-			Name:  bid.Name,
-			Total: bid.Amount,
-			Bets:  map[string]int{bid.UserID: bid.Amount},
-		}
-		r.cinemaOptions = append(r.cinemaOptions, option)
-		msg = fmt.Sprintf("<@%s> сделал ставку на аукцион \"%s\" %d", bid.UserID, bid.Name, bid.Amount)
-	} else {
-		if bid.Index < 0 || bid.Index >= len(r.cinemaOptions) {
-			r.mu.Unlock()
-			s.ChannelMessageEdit(rea.ChannelID, rea.MessageID, "Ошибка: вариант не найден.")
-			return
-		}
-		option := &r.cinemaOptions[bid.Index]
-		option.Bets[bid.UserID] = option.Bets[bid.UserID] + bid.Amount
-		option.Total += bid.Amount
-		msg = fmt.Sprintf("<@%s> добавил ставку %d на \"%s\" (total %d)", bid.UserID, bid.Amount, option.Name, option.Total)
-	}
-	r.SaveCinemaOptions()
-	delete(r.pendingCinemaBids, rea.MessageID)
-	r.mu.Unlock()
-
-	_, err := s.ChannelMessageSend(r.cinemaChannelID, msg)
-	if err != nil {
-		log.Printf("Failed to send to cinema channel: %v", err)
-	}
-	s.ChannelMessageEdit(rea.ChannelID, rea.MessageID, "Ставка подтверждена и обработана.")
-}
-
-// HandleCinemaCommand обрабатывает !cinema <название> <сумма>.
 func (r *Ranking) HandleCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	args := strings.Fields(command)
 	if len(args) < 3 {
-		s.ChannelMessageSend(m.ChannelID, "Использование: !cinema <название> <сумма>")
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Неверный формат команды",
+			Color:       0xFF0000,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Использование", Value: "`!cinema <название> <сумма>`\nПример: `!cinema Аватар 100`", Inline: false},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 
 	amount, err := strconv.Atoi(args[len(args)-1])
 	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "Сумма должна быть положительным числом")
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Сумма должна быть положительным числом",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 
 	name := strings.Join(args[1:len(args)-1], " ")
 	if name == "" {
-		s.ChannelMessageSend(m.ChannelID, "Название фильма не может быть пустым")
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Название фильма не может быть пустым",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 
-	// Проверка баланса пользователя через GetRating
 	balance := r.GetRating(m.Author.ID)
 	if balance < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов. Ваш баланс: %d", balance))
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: fmt.Sprintf("❌ Недостаточно кредитов. Ваш баланс: %d", balance),
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 
-	// Создаём pending ставку
 	bidID := generateBidID(m.Author.ID)
 	pendingBid := PendingCinemaBid{
-		UserID:    m.Author.ID,
-		IsNew:     true,
-		Name:      name,
-		Amount:    amount,
-		MessageID: "",
+		UserID: m.Author.ID,
+		IsNew:  true,
+		Name:   name,
+		Amount: amount,
 	}
 
-	// Отправляем сообщение с кнопками в CINEMA_CHANNEL_ID
-	components := []discordgo.MessageComponent{
-		discordgo.ActionsRow{
-			Components: []discordgo.MessageComponent{
-				discordgo.Button{
-					Label:    "Подтвердить",
-					Style:    discordgo.SuccessButton,
-					CustomID: "cinema_confirm_" + bidID,
-				},
-				discordgo.Button{
-					Label:    "Отклонить",
-					Style:    discordgo.DangerButton,
-					CustomID: "cinema_decline_" + bidID,
-				},
-			},
-		},
-	}
-
-	msg, err := s.ChannelMessageSendComplex(r.cinemaChannelID, &discordgo.MessageSend{
-		Content:    fmt.Sprintf("Новая ставка от <@%s>: фильм '%s', сумма %d. Подтвердите или отклоните:", m.Author.ID, name, amount),
-		Components: components,
-	})
-	if err != nil {
-		log.Printf("Ошибка отправки сообщения с кнопками: %v", err)
-		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
-		return
-	}
-
-	pendingBid.MessageID = msg.ID
-
-	// Сохраняем pending ставку в Redis
 	bidData, err := json.Marshal(pendingBid)
 	if err != nil {
 		log.Printf("Ошибка сериализации ставки: %v", err)
-		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка при создании ставки",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 	err = r.redis.Set(r.ctx, "pending_bid:"+bidID, bidData, 0).Err()
 	if err != nil {
 		log.Printf("Ошибка сохранения ставки в Redis: %v", err)
-		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка при создании ставки",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Ваша ставка на '%s' (%d кредитов) отправлена на подтверждение", name, amount))
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎥 Подтверждение ставки на киноаукцион",
+		Description: "Подтвердите вашу ставку",
+		Color:       randomColor(),
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Фильм", Value: name, Inline: true},
+			{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", amount), Inline: true},
+			{Name: "Пользователь", Value: fmt.Sprintf("<@%s>", m.Author.ID), Inline: true},
+		},
+		Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{Label: "✅ Подтвердить", Style: discordgo.SuccessButton, CustomID: "user_confirm_" + bidID},
+				discordgo.Button{Label: "❌ Отменить", Style: discordgo.DangerButton, CustomID: "user_decline_" + bidID},
+			},
+		},
+	}
+
+	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+		Embed:      embed,
+		Components: components,
+		Reference:  m.Reference(),
+	})
+	if err != nil {
+		log.Printf("Ошибка отправки сообщения юзеру: %v", err)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка при создании ставки",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+	pendingBid.UserMessageID = msg.ID
+
+	bidData, err = json.Marshal(pendingBid)
+	if err != nil {
+		log.Printf("Ошибка сериализации ставки: %v", err)
+		return
+	}
+	err = r.redis.Set(r.ctx, "pending_bid:"+bidID, bidData, 0).Err()
+	if err != nil {
+		log.Printf("Ошибка сохранения ставки в Redis: %v", err)
+		return
+	}
 }
 
-// HandleBetCinemaCommand обрабатывает !betcinema <номер> <сумма>.
 func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	args := strings.Fields(command)
 	if len(args) != 3 {
-		s.ChannelMessageSend(m.ChannelID, "Использование: !betcinema <номер> <сумма>")
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Неверный формат команды",
+			Color:       0xFF0000,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Использование", Value: "`!betcinema <номер> <сумма>`\nПример: `!betcinema 1 50`", Inline: false},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 
 	index, err := strconv.Atoi(args[1])
 	if err != nil || index < 1 || index > len(r.cinemaOptions) {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Неверный номер варианта (доступно: 1-%d)", len(r.cinemaOptions)))
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: fmt.Sprintf("❌ Неверный номер варианта (доступно: 1-%d)", len(r.cinemaOptions)),
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 
 	amount, err := strconv.Atoi(args[2])
 	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "Сумма должна быть положительным числом")
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Сумма должна быть положительным числом",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 
-	// Проверка баланса пользователя через GetRating
 	balance := r.GetRating(m.Author.ID)
 	if balance < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов. Ваш баланс: %d", balance))
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: fmt.Sprintf("❌ Недостаточно кредитов. Ваш баланс: %d", balance),
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 
-	// Создаём pending ставку
 	bidID := generateBidID(m.Author.ID)
 	pendingBid := PendingCinemaBid{
-		UserID:    m.Author.ID,
-		IsNew:     false,
-		Index:     index - 1,
-		Amount:    amount,
-		MessageID: "",
+		UserID: m.Author.ID,
+		IsNew:  false,
+		Index:  index - 1,
+		Amount: amount,
 	}
 
-	// Отправляем сообщение с кнопками в CINEMA_CHANNEL_ID
-	components := []discordgo.MessageComponent{
-		discordgo.ActionsRow{
-			Components: []discordgo.MessageComponent{
-				discordgo.Button{
-					Label:    "Подтвердить",
-					Style:    discordgo.SuccessButton,
-					CustomID: "cinema_confirm_" + bidID,
-				},
-				discordgo.Button{
-					Label:    "Отклонить",
-					Style:    discordgo.DangerButton,
-					CustomID: "cinema_decline_" + bidID,
-				},
-			},
-		},
-	}
-
-	msg, err := s.ChannelMessageSendComplex(r.cinemaChannelID, &discordgo.MessageSend{
-		Content:    fmt.Sprintf("Ставка от <@%s> на вариант #%d (%s), сумма %d. Подтвердите или отклоните:", m.Author.ID, index, r.cinemaOptions[index-1].Name, amount),
-		Components: components,
-	})
-	if err != nil {
-		log.Printf("Ошибка отправки сообщения с кнопками: %v", err)
-		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
-		return
-	}
-
-	pendingBid.MessageID = msg.ID
-
-	// Сохраняем pending ставку в Redis
 	bidData, err := json.Marshal(pendingBid)
 	if err != nil {
 		log.Printf("Ошибка сериализации ставки: %v", err)
-		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка при создании ставки",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 	err = r.redis.Set(r.ctx, "pending_bid:"+bidID, bidData, 0).Err()
 	if err != nil {
 		log.Printf("Ошибка сохранения ставки в Redis: %v", err)
-		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
-		return
-	}
-
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Ваша ставка на '%s' (%d кредитов) отправлена на подтверждение", r.cinemaOptions[index-1].Name, amount))
-}
-
-// HandleCinemaListCommand обрабатывает !cinemalist (для всех).
-func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
-	log.Printf("Обработка !cinemalist от %s", m.Author.ID)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.cinemaOptions) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "Пока нет вариантов на аукционе! 😢")
-		return
-	}
-	response := "Актуальные варианты киноаукциона:\n"
-	for i, opt := range r.cinemaOptions {
-		response += fmt.Sprintf("%d. %s — %d кредитов\n", i+1, opt.Name, opt.Total)
-	}
-	s.ChannelMessageSend(m.ChannelID, response)
-}
-
-// HandleAdminCinemaListCommand обрабатывает !admincinemalist (детальный для админов).
-func (r *Ranking) HandleAdminCinemaListCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
-	log.Printf("Обработка !admincinemalist от %s", m.Author.ID)
-	if !r.IsAdmin(m.Author.ID) {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут просматривать детальный список! 🔒")
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.cinemaOptions) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "Пока нет вариантов на аукционе! 😢")
-		return
-	}
-	response := "Детальный список вариантов киноаукциона:\n"
-	for i, opt := range r.cinemaOptions {
-		response += fmt.Sprintf("%d. %s — %d кредитов\n", i+1, opt.Name, opt.Total)
-		for userID, amt := range opt.Bets {
-			response += fmt.Sprintf("  - <@%s>: %d\n", userID, amt)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка при создании ставки",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
 		}
-	}
-	s.ChannelMessageSend(m.ChannelID, response)
-}
-
-// HandleRemoveLowestCommand обрабатывает !removelowest <число>.
-func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
-	log.Printf("Обработка !removelowest: %s от %s", command, m.Author.ID)
-	if !r.IsAdmin(m.Author.ID) {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут удалять варианты! 🔒")
-		return
-	}
-	parts := strings.Fields(command)
-	if len(parts) != 2 {
-		s.ChannelMessageSend(m.ChannelID, "Используй: !removelowest <число>")
-		return
-	}
-	num, err := strconv.Atoi(parts[1])
-	if err != nil || num <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "Число должно быть положительным!")
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
 
-	r.mu.Lock()
-	if num >= len(r.cinemaOptions) {
-		r.mu.Unlock()
-		s.ChannelMessageSend(m.ChannelID, "Слишком много — нельзя удалить все!")
-		return
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎥 Подтверждение ставки на киноаукцион",
+		Description: "Подтвердите вашу ставку",
+		Color:       randomColor(),
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Фильм", Value: r.cinemaOptions[index-1].Name, Inline: true},
+			{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", amount), Inline: true},
+			{Name: "Пользователь", Value: fmt.Sprintf("<@%s>", m.Author.ID), Inline: true},
+		},
+		Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	// Сортируем по total ascending
-	sort.Slice(r.cinemaOptions, func(i, j int) bool {
-		return r.cinemaOptions[i].Total < r.cinemaOptions[j].Total
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{Label: "✅ Подтвердить", Style: discordgo.SuccessButton, CustomID: "user_confirm_" + bidID},
+				discordgo.Button{Label: "❌ Отменить", Style: discordgo.DangerButton, CustomID: "user_decline_" + bidID},
+			},
+		},
+	}
+
+	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+		Embed:      embed,
+		Components: components,
+		Reference:  m.Reference(),
 	})
-
-	removed := r.cinemaOptions[:num]
-	r.cinemaOptions = r.cinemaOptions[num:]
-
-	// Рефанд ставок
-	for _, opt := range removed {
-		for userID, amt := range opt.Bets {
-			r.UpdateRating(userID, amt)
-			_, err := s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Возврат %d кредитов <@%s> за удаленный вариант \"%s\"", amt, userID, opt.Name))
-			if err != nil {
-				log.Printf("Failed to notify refund: %v", err)
-			}
-		}
-	}
-	r.SaveCinemaOptions()
-	r.mu.Unlock()
-
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ Удалено %d самых низких вариантов.", num))
-}
-
-// HandleAdjustCinemaCommand обрабатывает !adjustcinema <номер> <+/-сумма>.
-func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
-	log.Printf("Обработка !adjustcinema: %s от %s", command, m.Author.ID)
-	if !r.IsAdmin(m.Author.ID) {
-		s.ChannelMessageSend(m.ChannelID, "❌ Только админы могут корректировать ставки! 🔒")
-		return
-	}
-	parts := strings.Fields(command)
-	if len(parts) != 3 {
-		s.ChannelMessageSend(m.ChannelID, "Используй: !adjustcinema <номер> <+/-сумма>")
-		return
-	}
-	indexStr := parts[1]
-	adjustStr := parts[2]
-	index, err := strconv.Atoi(indexStr)
-	if err != nil || index <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "Неверный номер!")
-		return
-	}
-	index--
-	adjust, err := strconv.Atoi(adjustStr)
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "Сумма должна быть числом (с + или -)!")
+		log.Printf("Ошибка отправки сообщения юзеру: %v", err)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка при создании ставки",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
 		return
 	}
+	pendingBid.UserMessageID = msg.ID
 
-	r.mu.Lock()
-	if index >= len(r.cinemaOptions) {
-		r.mu.Unlock()
-		s.ChannelMessageSend(m.ChannelID, "Неверный номер варианта!")
+	bidData, err = json.Marshal(pendingBid)
+	if err != nil {
+		log.Printf("Ошибка сериализации ставки: %v", err)
 		return
 	}
-	opt := &r.cinemaOptions[index]
-	opt.Total += adjust
-	if opt.Total < 0 {
-		opt.Total = 0
+	err = r.redis.Set(r.ctx, "pending_bid:"+bidID, bidData, 0).Err()
+	if err != nil {
+		log.Printf("Ошибка сохранения ставки в Redis: %v", err)
+		return
 	}
-	r.SaveCinemaOptions()
-	r.mu.Unlock()
-
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ Обновлен total для \"%s\": %d", opt.Name, opt.Total))
 }
 
 func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	customID := i.MessageComponentData().CustomID
-	bidID := strings.Split(customID, "_")[2]
+	parts := strings.Split(customID, "_")
+	if len(parts) < 3 {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Ошибка: неверный формат кнопки",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+	action := parts[0] + "_" + parts[1]
+	bidID := strings.Join(parts[2:], "_")
 
-	// Загружаем pending ставку
 	bidData, err := r.redis.Get(r.ctx, "pending_bid:"+bidID).Result()
 	if err == redis.Nil {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "Ставка не найдена или уже обработана",
+				Content: "❌ Ставка не найдена или уже обработана",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -456,7 +390,7 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "Ошибка при обработке ставки",
+				Content: "❌ Ошибка при обработке ставки",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -469,19 +403,40 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "Ошибка при обработке ставки",
+				Content: "❌ Ошибка при обработке ставки",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
 		return
 	}
 
-	// Проверяем, что пользователь — автор ставки
-	if i.Member.User.ID != bid.UserID {
+	if strings.HasPrefix(action, "user_") {
+		if i.Member.User.ID != bid.UserID {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "❌ Только автор ставки может подтвердить или отменить её",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+	} else if strings.HasPrefix(action, "admin_") {
+		if !r.IsAdmin(i.Member.User.ID) {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "❌ Только админы могут принимать или отклонять ставки",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+	} else {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "Только автор ставки может подтвердить или отклонить её",
+				Content: "❌ Неверный тип кнопки",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -491,22 +446,181 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if strings.HasPrefix(customID, "cinema_confirm_") {
-		// Подтверждение ставки
+	if action == "user_confirm" {
+		// Проверка баланса
+		balance := r.GetRating(bid.UserID)
+		if balance < bid.Amount {
+			r.redis.Del(r.ctx, "pending_bid:"+bidID)
+			userEmbed := &discordgo.MessageEmbed{
+				Title:       "🎥 Киноаукцион",
+				Description: fmt.Sprintf("❌ Недостаточно кредитов для подтверждения. Ваш баланс: %d", balance),
+				Color:       0xFF0000,
+				Fields: []*discordgo.MessageEmbedField{
+					{Name: "Фильм", Value: bid.Name, Inline: true},
+					{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				},
+				Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+				Timestamp: time.Now().Format(time.RFC3339),
+			}
+			s.ChannelMessageEditEmbed(i.ChannelID, bid.UserMessageID, userEmbed)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "❌ Недостаточно кредитов",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+
+		// Замораживаем кредиты
+		r.UpdateRating(bid.UserID, -bid.Amount)
+
+		// Уведомляем админов
+		adminTags := ""
+		for adminID := range r.admins {
+			adminTags += fmt.Sprintf("<@%s> ", adminID)
+		}
+		adminEmbed := &discordgo.MessageEmbed{
+			Title:       "🎥 Новая ставка на киноаукцион",
+			Description: fmt.Sprintf("%s Подтвердите или отклоните ставку от <@%s>", adminTags, bid.UserID),
+			Color:       randomColor(),
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Фильм", Value: bid.Name, Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				{Name: "Пользователь", Value: fmt.Sprintf("<@%s>", bid.UserID), Inline: true},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+
+		adminComponents := []discordgo.MessageComponent{
+			discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					discordgo.Button{Label: "✅ Принять", Style: discordgo.SuccessButton, CustomID: "admin_accept_" + bidID},
+					discordgo.Button{Label: "❌ Отклонить", Style: discordgo.DangerButton, CustomID: "admin_reject_" + bidID},
+				},
+			},
+		}
+
+		adminMsg, err := s.ChannelMessageSendComplex(r.cinemaChannelID, &discordgo.MessageSend{
+			Embed:      adminEmbed,
+			Components: adminComponents,
+		})
+		if err != nil {
+			log.Printf("Ошибка отправки сообщения админам: %v", err)
+			r.UpdateRating(bid.UserID, bid.Amount) // Возвращаем кредиты
+			r.redis.Del(r.ctx, "pending_bid:"+bidID)
+			userEmbed := &discordgo.MessageEmbed{
+				Title:       "🎥 Киноаукцион",
+				Description: "❌ Ошибка при отправке ставки админам. Деньги возвращены.",
+				Color:       0xFF0000,
+				Fields: []*discordgo.MessageEmbedField{
+					{Name: "Фильм", Value: bid.Name, Inline: true},
+					{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				},
+				Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+				Timestamp: time.Now().Format(time.RFC3339),
+			}
+			s.ChannelMessageEditEmbed(i.ChannelID, bid.UserMessageID, userEmbed)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "❌ Ошибка при отправке ставки админам",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+
+		bid.AdminMessageID = adminMsg.ID
+
+		bidData, err := json.Marshal(bid)
+		if err != nil {
+			log.Printf("Ошибка сериализации ставки: %v", err)
+			r.UpdateRating(bid.UserID, bid.Amount) // Возвращаем кредиты
+			r.redis.Del(r.ctx, "pending_bid:"+bidID)
+			return
+		}
+		err = r.redis.Set(r.ctx, "pending_bid:"+bidID, bidData, 0).Err()
+		if err != nil {
+			log.Printf("Ошибка сохранения ставки в Redis: %v", err)
+			r.UpdateRating(bid.UserID, bid.Amount) // Возвращаем кредиты
+			r.redis.Del(r.ctx, "pending_bid:"+bidID)
+			return
+		}
+
+		userEmbed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "✅ Ставка подтверждена и отправлена админам. Кредиты заморожены.",
+			Color:       0x00FF00,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Фильм", Value: bid.Name, Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				{Name: "Новый баланс", Value: fmt.Sprintf("%d кредитов", r.GetRating(bid.UserID)), Inline: true},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+
+		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel:    i.ChannelID,
+			ID:         bid.UserMessageID,
+			Embed:      userEmbed,
+			Components: &[]discordgo.MessageComponent{},
+		})
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "✅ Ставка подтверждена",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+
+		r.LogCreditOperation(s, fmt.Sprintf("Заморожено %d кредитов у <@%s> за ставку на '%s'", bid.Amount, bid.UserID, bid.Name))
+	} else if action == "user_decline" {
+		r.redis.Del(r.ctx, "pending_bid:"+bidID)
+
+		userEmbed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ставка отменена",
+			Color:       0xFF0000,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Фильм", Value: bid.Name, Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+
+		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel:    i.ChannelID,
+			ID:         bid.UserMessageID,
+			Embed:      userEmbed,
+			Components: &[]discordgo.MessageComponent{},
+		})
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Ставка отменена",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+	} else if action == "admin_accept" {
 		if bid.IsNew {
-			// Новая опция
 			r.cinemaOptions = append(r.cinemaOptions, CinemaOption{
 				Name:  bid.Name,
 				Total: bid.Amount,
 				Bets:  map[string]int{bid.UserID: bid.Amount},
 			})
 		} else {
-			// Существующая опция
 			if bid.Index >= len(r.cinemaOptions) {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
-						Content: "Вариант больше не существует",
+						Content: "❌ Вариант больше не существует",
 						Flags:   discordgo.MessageFlagsEphemeral,
 					},
 				})
@@ -516,65 +630,380 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 			r.cinemaOptions[bid.Index].Bets[bid.UserID] += bid.Amount
 		}
 
-		// Снимаем кредиты через UpdateRating
-		r.UpdateRating(bid.UserID, -bid.Amount)
-
-		// Сохраняем обновлённые cinemaOptions
 		if err := r.SaveCinemaOptions(); err != nil {
 			log.Printf("Ошибка сохранения cinemaOptions: %v", err)
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: "Ошибка при сохранении данных аукциона",
+					Content: "❌ Ошибка при сохранении данных аукциона",
 					Flags:   discordgo.MessageFlagsEphemeral,
 				},
 			})
 			return
 		}
 
-		// Удаляем pending ставку
 		r.redis.Del(r.ctx, "pending_bid:"+bidID)
 
-		// Обновляем сообщение
-		content := fmt.Sprintf("Ставка от <@%s> на '%s' (%d кредитов) подтверждена", bid.UserID, bid.Name, bid.Amount)
-		components := []discordgo.MessageComponent{}
+		adminEmbed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "✅ Ставка принята",
+			Color:       0x00FF00,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Фильм", Value: bid.Name, Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				{Name: "Пользователь", Value: fmt.Sprintf("<@%s>", bid.UserID), Inline: true},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+
 		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 			Channel:    r.cinemaChannelID,
-			ID:         bid.MessageID,
-			Content:    &content,
-			Components: &components,
+			ID:         bid.AdminMessageID,
+			Embed:      adminEmbed,
+			Components: &[]discordgo.MessageComponent{},
 		})
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "Ставка подтверждена",
+				Content: "✅ Ставка принята",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
 
-		r.LogCreditOperation(s, fmt.Sprintf("Списано %d кредитов у <@%s> за ставку на '%s'", bid.Amount, bid.UserID, bid.Name))
-	} else if strings.HasPrefix(customID, "cinema_decline_") {
-		// Отклонение ставки
+		userEmbed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: fmt.Sprintf("✅ Ваша ставка на '%s' (%d кредитов) принята админами!", bid.Name, bid.Amount),
+			Color:       0x00FF00,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(r.floodChannelID, userEmbed)
+
+		r.LogCreditOperation(s, fmt.Sprintf("Ставка %d кредитов от <@%s> на '%s' принята", bid.Amount, bid.UserID, bid.Name))
+	} else if action == "admin_reject" {
+		r.UpdateRating(bid.UserID, bid.Amount)
 		r.redis.Del(r.ctx, "pending_bid:"+bidID)
 
-		content := fmt.Sprintf("Ставка от <@%s> на '%s' (%d кредитов) отклонена", bid.UserID, bid.Name, bid.Amount)
-		components := []discordgo.MessageComponent{}
+		adminEmbed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ставка отклонена, кредиты возвращены",
+			Color:       0xFF0000,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Фильм", Value: bid.Name, Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				{Name: "Пользователь", Value: fmt.Sprintf("<@%s>", bid.UserID), Inline: true},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+
 		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 			Channel:    r.cinemaChannelID,
-			ID:         bid.MessageID,
-			Content:    &content,
-			Components: &components,
+			ID:         bid.AdminMessageID,
+			Embed:      adminEmbed,
+			Components: &[]discordgo.MessageComponent{},
 		})
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "Ставка отклонена",
+				Content: "❌ Ставка отклонена",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
+		})
+
+		userEmbed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: fmt.Sprintf("❌ Ваша ставка на '%s' (%d кредитов) отклонена админами. Кредиты возвращены.", bid.Name, bid.Amount),
+			Color:       0xFF0000,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Новый баланс", Value: fmt.Sprintf("%d кредитов", r.GetRating(bid.UserID)), Inline: true},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(r.floodChannelID, userEmbed)
+
+		r.LogCreditOperation(s, fmt.Sprintf("Возвращено %d кредитов <@%s> за отклонённую ставку на '%s'", bid.Amount, bid.UserID, bid.Name))
+	}
+}
+
+func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.cinemaOptions) == 0 {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "📋 Список фильмов пуст",
+			Color:       randomColor(),
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	var fields []*discordgo.MessageEmbedField
+	for i, option := range r.cinemaOptions {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   fmt.Sprintf("Вариант #%d", i+1),
+			Value:  fmt.Sprintf("**Фильм:** %s\n**Сумма:** %d кредитов", option.Name, option.Total),
+			Inline: true,
 		})
 	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎥 Список фильмов",
+		Description: fmt.Sprintf("📋 Текущие фильмы на аукционе (%d):", len(r.cinemaOptions)),
+		Color:       randomColor(),
+		Fields:      fields,
+		Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+		Timestamp:   time.Now().Format(time.RFC3339),
+	}
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+}
+
+func (r *Ranking) HandleAdminCinemaListCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.IsAdmin(m.Author.ID) {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Только админы могут просматривать детальный список",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	if len(r.cinemaOptions) == 0 {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "📋 Список фильмов пуст",
+			Color:       randomColor(),
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	var fields []*discordgo.MessageEmbedField
+	for i, option := range r.cinemaOptions {
+		var bets []string
+		for userID, amount := range option.Bets {
+			bets = append(bets, fmt.Sprintf("<@%s>: %d", userID, amount))
+		}
+		betsStr := strings.Join(bets, "\n")
+		if betsStr == "" {
+			betsStr = "Нет ставок"
+		}
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   fmt.Sprintf("Вариант #%d", i+1),
+			Value:  fmt.Sprintf("**Фильм:** %s\n**Сумма:** %d кредитов\n**Ставки:**\n%s", option.Name, option.Total, betsStr),
+			Inline: false,
+		})
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎥 Детальный список фильмов (админ)",
+		Description: fmt.Sprintf("📋 Текущие фильмы на аукционе (%d):", len(r.cinemaOptions)),
+		Color:       randomColor(),
+		Fields:      fields,
+		Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬 | Только для админов"},
+		Timestamp:   time.Now().Format(time.RFC3339),
+	}
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+}
+
+func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.IsAdmin(m.Author.ID) {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Только админы могут удалять варианты",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	args := strings.Fields(command)
+	if len(args) != 2 {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Неверный формат команды",
+			Color:       0xFF0000,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Использование", Value: "`!removelowest <число>`\nПример: `!removelowest 2`", Inline: false},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	count, err := strconv.Atoi(args[1])
+	if err != nil || count <= 0 {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Число должно быть положительным",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	if count > len(r.cinemaOptions) {
+		count = len(r.cinemaOptions)
+	}
+
+	sortedOptions := make([]CinemaOption, len(r.cinemaOptions))
+	copy(sortedOptions, r.cinemaOptions)
+	sort.Slice(sortedOptions, func(i, j int) bool {
+		return sortedOptions[i].Total < sortedOptions[j].Total
+	})
+
+	removedFilms := make([]string, 0, count)
+	for _, option := range sortedOptions[:count] {
+		removedFilms = append(removedFilms, option.Name)
+		for userID, amount := range option.Bets {
+			r.UpdateRating(userID, amount)
+			r.LogCreditOperation(s, fmt.Sprintf("Возвращено %d кредитов пользователю <@%s> за удаление фильма '%s'", amount, userID, option.Name))
+		}
+	}
+
+	r.cinemaOptions = r.cinemaOptions[count:]
+	if err := r.SaveCinemaOptions(); err != nil {
+		log.Printf("Ошибка сохранения cinemaOptions: %v", err)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка при сохранении данных аукциона",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎥 Киноаукцион",
+		Description: fmt.Sprintf("🗑️ Удалено %d вариант(ов)", count),
+		Color:       randomColor(),
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Удалённые фильмы", Value: strings.Join(removedFilms, ", "), Inline: false},
+			{Name: "Действие", Value: "Кредиты возвращены участникам", Inline: false},
+		},
+		Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+}
+
+func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.IsAdmin(m.Author.ID) {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Только админы могут корректировать варианты",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	args := strings.Fields(command)
+	if len(args) != 3 {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Неверный формат команды",
+			Color:       0xFF0000,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Использование", Value: "`!adjustcinema <номер> <+/-сумма>`\nПример: `!adjustcinema 1 +100`", Inline: false},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	index, err := strconv.Atoi(args[1])
+	if err != nil || index < 1 || index > len(r.cinemaOptions) {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: fmt.Sprintf("❌ Неверный номер варианта (доступно: 1-%d)", len(r.cinemaOptions)),
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	adjustmentStr := args[2]
+	adjustment, err := strconv.Atoi(adjustmentStr)
+	if err != nil {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Корректировка должна быть числом (например, +100 или -50)",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	r.cinemaOptions[index-1].Total += adjustment
+	if r.cinemaOptions[index-1].Total < 0 {
+		r.cinemaOptions[index-1].Total = 0
+	}
+
+	if err := r.SaveCinemaOptions(); err != nil {
+		log.Printf("Ошибка сохранения cinemaOptions: %v", err)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка при сохранении данных аукциона",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		return
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎥 Киноаукцион",
+		Description: fmt.Sprintf("⚙️ Вариант #%d скорректирован", index),
+		Color:       randomColor(),
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Фильм", Value: r.cinemaOptions[index-1].Name, Inline: true},
+			{Name: "Корректировка", Value: adjustmentStr, Inline: true},
+			{Name: "Новая сумма", Value: fmt.Sprintf("%d кредитов", r.cinemaOptions[index-1].Total), Inline: true},
+		},
+		Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
 }
 
 func generateBidID(userID string) string {

@@ -80,10 +80,17 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 
 	// Обработчик взаимодействий (кнопок)
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if i.Member.User.ID == s.State.User.ID {
+			return
+		}
 		if i.Type == discordgo.InteractionMessageComponent {
 			customID := i.MessageComponentData().CustomID
 			log.Printf("Interaction received, CustomID: %s, ChannelID: %s, UserID: %s", customID, i.ChannelID, i.Member.User.ID)
 			switch {
+			case strings.HasPrefix(customID, "user_confirm_") || strings.HasPrefix(customID, "user_decline_") ||
+				strings.HasPrefix(customID, "admin_accept_") || strings.HasPrefix(customID, "admin_reject_"):
+				log.Printf("Matched cinema button: %s", customID)
+				rank.HandleCinemaButton(s, i)
 			case strings.HasPrefix(customID, "cinema_confirm_") || strings.HasPrefix(customID, "cinema_decline_"):
 				log.Printf("Matched cinema button: %s", customID)
 				rank.HandleCinemaButton(s, i)
@@ -109,9 +116,7 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 			log.Printf("Received non-component interaction: %v", i.Type)
 		}
 	})
-
-	dg.AddHandler(rank.HandleMessageReactionAdd)
-
+	
 	go handleTelegramUpdates(tgBot, chatID, dg, relayChannelID)
 	select {}
 }
