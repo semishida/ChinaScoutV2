@@ -31,20 +31,19 @@ type PendingCinemaBid struct {
 }
 
 // LoadCinemaOptions загружает варианты аукциона из Redis.
-func (r *Ranking) LoadCinemaOptions() {
-	data, err := r.redis.Get(r.ctx, "cinema:options").Result()
+func (r *Ranking) LoadCinemaOptions() error {
+	data, err := r.redis.Get(r.ctx, "cinema_options").Result()
 	if err == redis.Nil {
 		r.cinemaOptions = []CinemaOption{}
-		return
-	} else if err != nil {
-		log.Printf("Не удалось загрузить cinema options из Redis: %v", err)
-		r.cinemaOptions = []CinemaOption{}
-		return
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to load cinemaOptions from Redis: %v", err)
 	}
 	if err := json.Unmarshal([]byte(data), &r.cinemaOptions); err != nil {
-		log.Printf("Не удалось разобрать cinema options: %v", err)
-		r.cinemaOptions = []CinemaOption{}
+		return fmt.Errorf("failed to unmarshal cinemaOptions: %v", err)
 	}
+	return nil
 }
 
 // SaveCinemaOptions сохраняет варианты аукциона в Redis.
@@ -154,15 +153,8 @@ func (r *Ranking) HandleCinemaCommand(s *discordgo.Session, m *discordgo.Message
 		return
 	}
 
-	// Проверка баланса пользователя
-	balance, err := r.redis.Get(r.ctx, "credits:"+m.Author.ID).Int()
-	if err == redis.Nil {
-		balance = 0
-	} else if err != nil {
-		log.Printf("Ошибка проверки баланса %s: %v", m.Author.ID, err)
-		s.ChannelMessageSend(m.ChannelID, "Ошибка при проверке баланса")
-		return
-	}
+	// Проверка баланса пользователя через GetRating
+	balance := r.GetRating(m.Author.ID)
 	if balance < amount {
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов. Ваш баланс: %d", balance))
 		return
@@ -175,7 +167,7 @@ func (r *Ranking) HandleCinemaCommand(s *discordgo.Session, m *discordgo.Message
 		IsNew:     true,
 		Name:      name,
 		Amount:    amount,
-		MessageID: "", // Будет заполнено после отправки сообщения
+		MessageID: "",
 	}
 
 	// Отправляем сообщение с кнопками в CINEMA_CHANNEL_ID
@@ -206,7 +198,6 @@ func (r *Ranking) HandleCinemaCommand(s *discordgo.Session, m *discordgo.Message
 		return
 	}
 
-	// Сохраняем ID сообщения
 	pendingBid.MessageID = msg.ID
 
 	// Сохраняем pending ставку в Redis
@@ -249,15 +240,8 @@ func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.Mess
 		return
 	}
 
-	// Проверка баланса пользователя
-	balance, err := r.redis.Get(r.ctx, "credits:"+m.Author.ID).Int()
-	if err == redis.Nil {
-		balance = 0
-	} else if err != nil {
-		log.Printf("Ошибка проверки баланса %s: %v", m.Author.ID, err)
-		s.ChannelMessageSend(m.ChannelID, "Ошибка при проверке баланса")
-		return
-	}
+	// Проверка баланса пользователя через GetRating
+	balance := r.GetRating(m.Author.ID)
 	if balance < amount {
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов. Ваш баланс: %d", balance))
 		return
@@ -532,19 +516,8 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 			r.cinemaOptions[bid.Index].Bets[bid.UserID] += bid.Amount
 		}
 
-		// Снимаем кредиты
-		err = r.redis.DecrBy(r.ctx, "credits:"+bid.UserID, int64(bid.Amount)).Err()
-		if err != nil {
-			log.Printf("Ошибка списания кредитов %s: %v", bid.UserID, err)
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: "Ошибка при списании кредитов",
-					Flags:   discordgo.MessageFlagsEphemeral,
-				},
-			})
-			return
-		}
+		// Снимаем кредиты через UpdateRating
+		r.UpdateRating(bid.UserID, -bid.Amount)
 
 		// Сохраняем обновлённые cinemaOptions
 		if err := r.SaveCinemaOptions(); err != nil {
