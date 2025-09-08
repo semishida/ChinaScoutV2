@@ -262,7 +262,7 @@ func handleTelegramUpdates(bot *tgbotapi.BotAPI, chatID int64, dg *discordgo.Ses
 
 func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *ranking.Ranking) {
 	command := strings.TrimSpace(strings.ToLower(m.Content))
-	log.Printf("Processing command: %s", command)
+	log.Printf("Processing command: %s from %s", command, m.Author.ID)
 	switch {
 	case strings.HasPrefix(command, "!cpoll"):
 		log.Printf("Matched !cpoll")
@@ -303,6 +303,24 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!adminmass"):
 		log.Printf("Matched !adminmass")
 		rank.HandleAdminMassCommand(s, m, m.Content)
+	case command == "!admincinemalist":
+		log.Printf("Matched !admincinemalist")
+		rank.HandleAdminCinemaListCommand(s, m)
+	case strings.HasPrefix(command, "!removelowest "):
+		log.Printf("Matched !removelowest")
+		rank.HandleRemoveLowestCommand(s, m, command)
+	case strings.HasPrefix(command, "!adjustcinema "):
+		log.Printf("Matched !adjustcinema")
+		rank.HandleAdjustCinemaCommand(s, m, command)
+	case strings.HasPrefix(command, "!cinema "):
+		log.Printf("Matched !cinema")
+		rank.HandleCinemaCommand(s, m, command)
+	case strings.HasPrefix(command, "!betcinema "):
+		log.Printf("Matched !betcinema")
+		rank.HandleBetCinemaCommand(s, m, command)
+	case command == "!cinemalist":
+		log.Printf("Matched !cinemalist")
+		rank.HandleCinemaListCommand(s, m)
 	case strings.HasPrefix(command, "!admin"):
 		log.Printf("Matched !admin")
 		rank.HandleAdminCommand(s, m, m.Content)
@@ -315,24 +333,6 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!transfer"):
 		log.Printf("Matched !transfer")
 		rank.HandleTransferCommand(s, m, m.Content)
-	case strings.HasPrefix(command, "!cinema "):
-		log.Printf("Matched !cinema")
-		rank.HandleCinemaCommand(s, m, command)
-	case strings.HasPrefix(command, "!betcinema "):
-		log.Printf("Matched !betcinema")
-		rank.HandleBetCinemaCommand(s, m, command)
-	case command == "!cinemalist":
-		log.Printf("Matched !cinemalist")
-		rank.HandleCinemaListCommand(s, m)
-	case command == "!admincinemalist":
-		log.Printf("Matched !admincinemalist")
-		rank.HandleAdminCinemaListCommand(s, m)
-	case strings.HasPrefix(command, "!removelowest "):
-		log.Printf("Matched !removelowest")
-		rank.HandleRemoveLowestCommand(s, m, command)
-	case strings.HasPrefix(command, "!adjustcinema "):
-		log.Printf("Matched !adjustcinema")
-		rank.HandleAdjustCinemaCommand(s, m, command)
 	default:
 		log.Printf("No match for command: %s", command)
 	}
