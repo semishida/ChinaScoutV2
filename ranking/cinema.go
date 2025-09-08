@@ -1133,7 +1133,7 @@ func splitLongMessage(message string, maxLength int) ([]string, error) {
 	}
 	if message == "" {
 		log.Printf("Сообщение пустое, возврат пустого списка")
-		return []string{"```css\n(Пустой список)\n```"}, nil
+		return []string{"```\n(Пустой список)\n```"}, nil
 	}
 
 	var parts []string
@@ -1148,15 +1148,15 @@ func splitLongMessage(message string, maxLength int) ([]string, error) {
 		}
 		if currentLength+len(line)+1 > maxLength {
 			if currentPart == "" {
-				currentPart = "```css\n"
+				currentPart = "```\n"
 			}
 			parts = append(parts, currentPart+"```")
 			log.Printf("Добавлена часть длиной %d символов", len(currentPart+"```"))
-			currentPart = "```css\n"
+			currentPart = "```\n"
 			currentLength = len(line) + len("```css\n") + 1
 		} else {
 			if currentPart == "" {
-				currentPart = "```css"
+				currentPart = "```"
 			}
 			currentPart += line + "\n"
 			currentLength += len(line) + 1
@@ -1170,7 +1170,7 @@ func splitLongMessage(message string, maxLength int) ([]string, error) {
 
 	if len(parts) == 0 {
 		log.Printf("Список частей пуст, добавление дефолтной части")
-		parts = append(parts, "```css\n(Пустой список)\n```")
+		parts = append(parts, "```\n(Пустой список)\n```")
 	}
 
 	log.Printf("Сообщение разбито на %d частей", len(parts))
