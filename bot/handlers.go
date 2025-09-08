@@ -116,7 +116,7 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 			log.Printf("Received non-component interaction: %v", i.Type)
 		}
 	})
-	
+
 	go handleTelegramUpdates(tgBot, chatID, dg, relayChannelID)
 	select {}
 }

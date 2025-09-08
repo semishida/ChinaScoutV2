@@ -746,24 +746,47 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 		return
 	}
 
-	var fields []*discordgo.MessageEmbedField
+	// Формируем таблицу
+	table := "```css\n"
+	table += fmt.Sprintf("%-5s %-40s %s\n", "#", "Фильм", "Кредиты")
+	table += strings.Repeat("-", 60) + "\n"
+
 	for i, option := range r.cinemaOptions {
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   fmt.Sprintf("Вариант #%d", i+1),
-			Value:  fmt.Sprintf("**Фильм:** %s\n**Сумма:** %d кредитов", option.Name, option.Total),
-			Inline: true,
-		})
+		if i >= 100 { // Ограничиваем до 100 позиций
+			break
+		}
+		filmName := option.Name
+		if len(filmName) > 37 { // Обрезаем длинные названия
+			filmName = filmName[:34] + "..."
+		}
+		table += fmt.Sprintf("%-5d %-40s %d\n", i+1, filmName, option.Total)
 	}
+	table += "```"
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "🎥 Список фильмов",
-		Description: fmt.Sprintf("📋 Текущие фильмы на аукционе (%d):", len(r.cinemaOptions)),
+		Description: fmt.Sprintf("📋 Текущие фильмы на аукционе (%d):\n%s", len(r.cinemaOptions), table),
 		Color:       randomColor(),
-		Fields:      fields,
 		Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 		Timestamp:   time.Now().Format(time.RFC3339),
 	}
-	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+
+	// Если таблица слишком длинная, разбиваем на части
+	if len(embed.Description) > 2000 {
+		parts := splitLongMessage(embed.Description, 1900)
+		for i, part := range parts {
+			partEmbed := &discordgo.MessageEmbed{
+				Title:       "🎥 Список фильмов" + fmt.Sprintf(" (Часть %d)", i+1),
+				Description: part,
+				Color:       embed.Color,
+				Footer:      embed.Footer,
+				Timestamp:   embed.Timestamp,
+			}
+			s.ChannelMessageSendEmbed(m.ChannelID, partEmbed)
+		}
+	} else {
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	}
 }
 
 func (r *Ranking) HandleAdminCinemaListCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -794,34 +817,56 @@ func (r *Ranking) HandleAdminCinemaListCommand(s *discordgo.Session, m *discordg
 		return
 	}
 
-	var fields []*discordgo.MessageEmbedField
+	// Формируем таблицу
+	table := "```css\n"
+	table += fmt.Sprintf("%-5s %-40s %-10s %s\n", "#", "Фильм", "Кредиты", "Ставки")
+	table += strings.Repeat("-", 80) + "\n"
+
 	for i, option := range r.cinemaOptions {
-		var bets []string
+		if i >= 100 { // Ограничиваем до 100 позиций
+			break
+		}
+		filmName := option.Name
+		if len(filmName) > 37 { // Обрезаем длинные названия
+			filmName = filmName[:34] + "..."
+		}
+		bets := []string{}
 		for userID, amount := range option.Bets {
 			bets = append(bets, fmt.Sprintf("<@%s>: %d", userID, amount))
 		}
-		betsStr := strings.Join(bets, "\n")
+		betsStr := strings.Join(bets, ", ")
 		if betsStr == "" {
 			betsStr = "Нет ставок"
 		}
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   fmt.Sprintf("Вариант #%d", i+1),
-			Value:  fmt.Sprintf("**Фильм:** %s\n**Сумма:** %d кредитов\n**Ставки:**\n%s", option.Name, option.Total, betsStr),
-			Inline: false,
-		})
+		table += fmt.Sprintf("%-5d %-40s %-10d %s\n", i+1, filmName, option.Total, betsStr)
 	}
+	table += "```"
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "🎥 Детальный список фильмов (админ)",
-		Description: fmt.Sprintf("📋 Текущие фильмы на аукционе (%d):", len(r.cinemaOptions)),
+		Description: fmt.Sprintf("📋 Текущие фильмы на аукционе (%d):\n%s", len(r.cinemaOptions), table),
 		Color:       randomColor(),
-		Fields:      fields,
 		Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬 | Только для админов"},
 		Timestamp:   time.Now().Format(time.RFC3339),
 	}
-	s.ChannelMessageSendEmbed(m.ChannelID, embed)
-}
 
+	// Если таблица слишком длинная, разбиваем на части
+	if len(embed.Description) > 2000 {
+		parts := splitLongMessage(embed.Description, 1900)
+		for i, part := range parts {
+			partEmbed := &discordgo.MessageEmbed{
+				Title:       "🎥 Детальный список фильмов" + fmt.Sprintf(" (Часть %d)", i+1),
+				Description: part,
+				Color:       embed.Color,
+				Footer:      embed.Footer,
+				Timestamp:   embed.Timestamp,
+			}
+			s.ChannelMessageSendEmbed(m.ChannelID, partEmbed)
+		}
+	} else {
+		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	}
+}
 func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1008,4 +1053,29 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 
 func generateBidID(userID string) string {
 	return fmt.Sprintf("%s-%d", userID, time.Now().UnixNano())
+}
+
+// splitLongMessage разбивает длинное сообщение на части, не превышающие maxLength символов
+func splitLongMessage(message string, maxLength int) []string {
+	var parts []string
+	lines := strings.Split(message, "\n")
+	currentPart := ""
+	currentLength := 0
+
+	for _, line := range lines {
+		if currentLength+len(line)+1 > maxLength {
+			parts = append(parts, currentPart)
+			currentPart = "```css\n" + line + "\n"
+			currentLength = len(currentPart)
+		} else {
+			currentPart += line + "\n"
+			currentLength += len(line) + 1
+		}
+	}
+
+	if currentPart != "" {
+		parts = append(parts, currentPart+"```")
+	}
+
+	return parts
 }
