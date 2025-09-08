@@ -786,14 +786,14 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 		parts, err := splitLongMessage(embed.Description, 1900)
 		if err != nil {
 			log.Printf("Ошибка разбиения сообщения для !cinemalist: %v", err)
-			embed := &discordgo.MessageEmbed{
+			errorEmbed := &discordgo.MessageEmbed{
 				Title:       "🎥 Киноаукцион",
 				Description: "❌ Ошибка при формировании списка",
 				Color:       0xFF0000,
 				Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 				Timestamp:   time.Now().Format(time.RFC3339),
 			}
-			if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			if _, err := s.ChannelMessageSendEmbed(m.ChannelID, errorEmbed); err != nil {
 				log.Printf("Ошибка отправки сообщения об ошибке для !cinemalist: %v", err)
 			}
 			return
@@ -899,7 +899,7 @@ func (r *Ranking) HandleAdminCinemaListCommand(s *discordgo.Session, m *discordg
 	}
 }
 func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
-	log.Printf("Начало обработки !removelowest для пользователя %s", m.Author.ID)
+	log.Printf("Начало обработки !removelowest: %s от %s", command, m.Author.ID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -969,7 +969,7 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 	}
 
 	if count > len(r.cinemaOptions) {
-		log.Printf("Указано слишком большое число для удаления: %d, доступно: %d", count, len(r.cinemaOptions))
+		log.Printf("Указано слишком большое число для удаления: %d, доступно: %d, устанавливаю count = %d", count, len(r.cinemaOptions), len(r.cinemaOptions))
 		count = len(r.cinemaOptions)
 	}
 
@@ -1029,10 +1029,12 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 	log.Printf("Завершение обработки !removelowest")
 }
 func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
+	log.Printf("Начало обработки !adjustcinema: %s от %s", command, m.Author.ID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if !r.IsAdmin(m.Author.ID) {
+		log.Printf("Пользователь %s не админ", m.Author.ID)
 		embed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
 			Description: "❌ Только админы могут корректировать варианты",
@@ -1040,12 +1042,15 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp:   time.Now().Format(time.RFC3339),
 		}
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !adjustcinema: %v", err)
+		}
 		return
 	}
 
 	args := strings.Fields(command)
 	if len(args) != 3 {
+		log.Printf("Неверный формат команды: %s", command)
 		embed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
 			Description: "❌ Неверный формат команды",
@@ -1056,12 +1061,15 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp: time.Now().Format(time.RFC3339),
 		}
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !adjustcinema: %v", err)
+		}
 		return
 	}
 
 	index, err := strconv.Atoi(args[1])
 	if err != nil || index < 1 || index > len(r.cinemaOptions) {
+		log.Printf("Неверный номер варианта: %s", args[1])
 		embed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
 			Description: fmt.Sprintf("❌ Неверный номер варианта (доступно: 1-%d)", len(r.cinemaOptions)),
@@ -1069,13 +1077,16 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp:   time.Now().Format(time.RFC3339),
 		}
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !adjustcinema: %v", err)
+		}
 		return
 	}
 
 	adjustmentStr := args[2]
 	adjustment, err := strconv.Atoi(adjustmentStr)
 	if err != nil {
+		log.Printf("Неверная корректировка: %s", adjustmentStr)
 		embed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
 			Description: "❌ Корректировка должна быть числом (например, +100 или -50)",
@@ -1083,12 +1094,15 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp:   time.Now().Format(time.RFC3339),
 		}
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !adjustcinema: %v", err)
+		}
 		return
 	}
 
 	r.cinemaOptions[index-1].Total += adjustment
 	if r.cinemaOptions[index-1].Total < 0 {
+		log.Printf("Корректировка привела к отрицательной сумме, установка в 0 для варианта #%d", index)
 		r.cinemaOptions[index-1].Total = 0
 	}
 
@@ -1101,10 +1115,13 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp:   time.Now().Format(time.RFC3339),
 		}
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения об ошибке для !adjustcinema: %v", err)
+		}
 		return
 	}
 
+	log.Printf("Корректировка завершена для варианта #%d, новая сумма: %d", index, r.cinemaOptions[index-1].Total)
 	embed := &discordgo.MessageEmbed{
 		Title:       "🎥 Киноаукцион",
 		Description: fmt.Sprintf("⚙️ Вариант #%d скорректирован", index),
@@ -1117,9 +1134,11 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 		Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
-	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+		log.Printf("Ошибка отправки сообщения для !adjustcinema: %v", err)
+	}
+	log.Printf("Завершение обработки !adjustcinema")
 }
-
 func generateBidID(userID string) string {
 	return fmt.Sprintf("%s-%d", userID, time.Now().UnixNano())
 }
