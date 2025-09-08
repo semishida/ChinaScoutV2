@@ -783,8 +783,7 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 	log.Printf("Длина описания embed: %d символов", len(embed.Description))
 	if len(embed.Description) > 2000 {
 		log.Printf("Разбиение длинного сообщения")
-		err := splitLongMessage(embed.Description, 1900)
-		parts := strings.Split(embed.Description, "\n")
+		parts, err := splitLongMessage(embed.Description, 1900)
 		if err != nil {
 			log.Printf("Ошибка разбиения сообщения для !cinemalist: %v", err)
 			embed := &discordgo.MessageEmbed{
@@ -884,7 +883,7 @@ func (r *Ranking) HandleAdminCinemaListCommand(s *discordgo.Session, m *discordg
 
 	// Если таблица слишком длинная, разбиваем на части
 	if len(embed.Description) > 2000 {
-		parts := splitLongMessage(embed.Description, 1900)
+		parts, _ := splitLongMessage(embed.Description, 1900)
 		for i, part := range parts {
 			partEmbed := &discordgo.MessageEmbed{
 				Title:       "🎥 Детальный список фильмов" + fmt.Sprintf(" (Часть %d)", i+1),
@@ -1126,18 +1125,39 @@ func generateBidID(userID string) string {
 }
 
 // splitLongMessage разбивает длинное сообщение на части, не превышающие maxLength символов
-func splitLongMessage(message string, maxLength int) []string {
+func splitLongMessage(message string, maxLength int) ([]string, error) {
+	log.Printf("Разбиение сообщения длиной %d символов, maxLength: %d", len(message), maxLength)
+	if maxLength <= 0 {
+		log.Printf("Ошибка: maxLength должен быть положительным")
+		return nil, fmt.Errorf("maxLength должен быть положительным")
+	}
+	if message == "" {
+		log.Printf("Сообщение пустое, возврат пустого списка")
+		return []string{"```css\n(Пустой список)\n```"}, nil
+	}
+
 	var parts []string
 	lines := strings.Split(message, "\n")
 	currentPart := ""
 	currentLength := 0
 
 	for _, line := range lines {
+		if len(line) > maxLength {
+			log.Printf("Обрезка длинной строки: %d символов", len(line))
+			line = line[:maxLength-3] + "..."
+		}
 		if currentLength+len(line)+1 > maxLength {
-			parts = append(parts, currentPart)
-			currentPart = "```css\n" + line + "\n"
-			currentLength = len(currentPart)
+			if currentPart == "" {
+				currentPart = "```css\n"
+			}
+			parts = append(parts, currentPart+"```")
+			log.Printf("Добавлена часть длиной %d символов", len(currentPart+"```"))
+			currentPart = "```css\n"
+			currentLength = len(line) + len("```css\n") + 1
 		} else {
+			if currentPart == "" {
+				currentPart = "```css"
+			}
 			currentPart += line + "\n"
 			currentLength += len(line) + 1
 		}
@@ -1145,7 +1165,14 @@ func splitLongMessage(message string, maxLength int) []string {
 
 	if currentPart != "" {
 		parts = append(parts, currentPart+"```")
+		log.Printf("Добавлена последняя часть длиной %d символов", len(currentPart+"```"))
 	}
 
-	return parts
+	if len(parts) == 0 {
+		log.Printf("Список частей пуст, добавление дефолтной части")
+		parts = append(parts, "```css\n(Пустой список)\n```")
+	}
+
+	log.Printf("Сообщение разбито на %d частей", len(parts))
+	return parts, nil
 }
