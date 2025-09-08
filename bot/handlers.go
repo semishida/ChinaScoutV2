@@ -107,6 +107,8 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 		}
 	})
 
+	dg.AddHandler(rank.HandleMessageReactionAdd)
+
 	go handleTelegramUpdates(tgBot, chatID, dg, relayChannelID)
 	select {}
 }
@@ -305,6 +307,24 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!transfer"):
 		log.Printf("Matched !transfer")
 		rank.HandleTransferCommand(s, m, m.Content)
+	case strings.HasPrefix(command, "!cinema "):
+		log.Printf("Matched !cinema")
+		rank.HandleCinemaCommand(s, m, command)
+	case strings.HasPrefix(command, "!betcinema "):
+		log.Printf("Matched !betcinema")
+		rank.HandleBetCinemaCommand(s, m, command)
+	case command == "!cinemalist":
+		log.Printf("Matched !cinemalist")
+		rank.HandleCinemaListCommand(s, m)
+	case command == "!admincinemalist":
+		log.Printf("Matched !admincinemalist")
+		rank.HandleAdminCinemaListCommand(s, m)
+	case strings.HasPrefix(command, "!removelowest "):
+		log.Printf("Matched !removelowest")
+		rank.HandleRemoveLowestCommand(s, m, command)
+	case strings.HasPrefix(command, "!adjustcinema "):
+		log.Printf("Matched !adjustcinema")
+		rank.HandleAdjustCinemaCommand(s, m, command)
 	default:
 		log.Printf("No match for command: %s", command)
 	}

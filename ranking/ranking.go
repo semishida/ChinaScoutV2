@@ -18,36 +18,42 @@ import (
 
 // Ranking управляет рейтингами, опросами, играми и голосовой активностью.
 type Ranking struct {
-	mu             sync.Mutex
-	admins         map[string]bool
-	polls          map[string]*Poll
-	duels          map[string]*Duel
-	redis          *redis.Client
-	ctx            context.Context
-	voiceAct       map[string]int
-	redBlackGames  map[string]*RedBlackGame
-	blackjackGames map[string]*BlackjackGame
-	floodChannelID string
-	logChannelID   string
+	mu                sync.Mutex
+	admins            map[string]bool
+	polls             map[string]*Poll
+	duels             map[string]*Duel
+	redis             *redis.Client
+	ctx               context.Context
+	voiceAct          map[string]int
+	redBlackGames     map[string]*RedBlackGame
+	blackjackGames    map[string]*BlackjackGame
+	floodChannelID    string
+	logChannelID      string
+	cinemaOptions     []CinemaOption
+	pendingCinemaBids map[string]PendingCinemaBid
+	cinemaChannelID   string
 }
 
 // NewRanking инициализирует структуру Ranking.
-func NewRanking(adminFilePath, redisAddr, floodChannelID string) (*Ranking, error) {
+func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string) (*Ranking, error) {
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Ошибка загрузки .env файла")
 	}
 
 	r := &Ranking{
-		admins:         make(map[string]bool),
-		polls:          make(map[string]*Poll),
-		duels:          make(map[string]*Duel),
-		voiceAct:       make(map[string]int),
-		redBlackGames:  make(map[string]*RedBlackGame),
-		blackjackGames: make(map[string]*BlackjackGame),
-		ctx:            context.Background(),
-		floodChannelID: floodChannelID,
-		logChannelID:   os.Getenv("LOG_CHANNEL_ID"),
+		admins:            make(map[string]bool),
+		polls:             make(map[string]*Poll),
+		duels:             make(map[string]*Duel),
+		voiceAct:          map[string]int{},
+		redBlackGames:     make(map[string]*RedBlackGame),
+		blackjackGames:    make(map[string]*BlackjackGame),
+		ctx:               context.Background(),
+		floodChannelID:    floodChannelID,
+		logChannelID:      os.Getenv("LOG_CHANNEL_ID"),
+		cinemaOptions:     []CinemaOption{},
+		pendingCinemaBids: make(map[string]PendingCinemaBid),
+		cinemaChannelID:   cinemaChannelID,
 	}
 
 	// Подключение к Redis с повторными попытками
@@ -84,6 +90,9 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID string) (*Ranking, erro
 	for _, id := range admins.IDs {
 		r.admins[id] = true
 	}
+
+	// Загрузка cinema options
+	r.LoadCinemaOptions()
 
 	log.Printf("Инициализирован рейтинг с %d администраторами", len(r.admins))
 	return r, nil

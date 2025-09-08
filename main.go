@@ -38,7 +38,7 @@ func main() {
 		log.Fatal("CINEMA_CHANNEL_ID is not set")
 	}
 
-	rank, err := ranking.NewRanking(adminFilePath, redisAddr, floodChannelID)
+	rank, err := ranking.NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID)
 	if err != nil {
 		log.Fatalf("Failed to initialize ranking: %v", err)
 	}
