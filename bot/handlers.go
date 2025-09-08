@@ -84,6 +84,9 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 			customID := i.MessageComponentData().CustomID
 			log.Printf("Interaction received, CustomID: %s, ChannelID: %s, UserID: %s", customID, i.ChannelID, i.Member.User.ID)
 			switch {
+			case strings.HasPrefix(customID, "cinema_confirm_") || strings.HasPrefix(customID, "cinema_decline_"):
+				log.Printf("Matched cinema button: %s", customID)
+				rank.HandleCinemaButton(s, i)
 			case strings.HasPrefix(customID, "blackjack_hit_"):
 				log.Printf("Matched blackjack_hit_")
 				rank.HandleBlackjackHit(s, i)

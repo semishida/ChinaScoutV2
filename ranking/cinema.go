@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/go-redis/redis/v8"
@@ -21,11 +22,12 @@ type CinemaOption struct {
 
 // PendingCinemaBid представляет pending ставку для подтверждения.
 type PendingCinemaBid struct {
-	UserID string
-	IsNew  bool
-	Name   string // для новых
-	Index  int    // для существующих (0-based)
-	Amount int
+	UserID    string
+	IsNew     bool
+	Name      string // для новых
+	Index     int    // для существующих (0-based)
+	Amount    int
+	MessageID string
 }
 
 // LoadCinemaOptions загружает варианты аукциона из Redis.
@@ -46,15 +48,16 @@ func (r *Ranking) LoadCinemaOptions() {
 }
 
 // SaveCinemaOptions сохраняет варианты аукциона в Redis.
-func (r *Ranking) SaveCinemaOptions() {
-	dataBytes, err := json.Marshal(r.cinemaOptions)
+func (r *Ranking) SaveCinemaOptions() error {
+	data, err := json.Marshal(r.cinemaOptions)
 	if err != nil {
-		log.Printf("Не удалось сериализовать cinema options: %v", err)
-		return
+		return fmt.Errorf("failed to marshal cinemaOptions: %v", err)
 	}
-	if err := r.redis.Set(r.ctx, "cinema:options", dataBytes, 0).Err(); err != nil {
-		log.Printf("Не удалось сохранить cinema options в Redis: %v", err)
+	err = r.redis.Set(r.ctx, "cinema_options", data, 0).Err()
+	if err != nil {
+		return fmt.Errorf("failed to save cinemaOptions to Redis: %v", err)
 	}
+	return nil
 }
 
 // HandleMessageReactionAdd обрабатывает реакции на сообщения подтверждения ставок.
@@ -130,117 +133,191 @@ func (r *Ranking) HandleMessageReactionAdd(s *discordgo.Session, rea *discordgo.
 
 // HandleCinemaCommand обрабатывает !cinema <название> <сумма>.
 func (r *Ranking) HandleCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
-	log.Printf("Обработка !cinema: %s от %s", command, m.Author.ID)
-	parts := strings.Fields(command)
-	if len(parts) < 3 {
-		s.ChannelMessageSend(m.ChannelID, "Используй: !cinema <название> <сумма>")
-		return
-	}
-	amountStr := parts[len(parts)-1]
-	amount, err := strconv.Atoi(amountStr)
-	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "Сумма должна быть положительным числом!")
-		return
-	}
-	name := strings.Join(parts[1:len(parts)-1], " ")
-	if len(name) > 255 {
-		s.ChannelMessageSend(m.ChannelID, "Название слишком длинное (max 255 символов)!")
-		return
-	}
-
-	userRating := r.GetRating(m.Author.ID)
-	if userRating < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов! Твой баланс: %d", userRating))
-		return
-	}
-
-	confirmText := fmt.Sprintf("Отправить админу на киноаук вариант \"%s\" со ставкой %d?", name, amount)
-	confirmMsg, err := s.ChannelMessageSend(m.ChannelID, confirmText)
-	if err != nil {
-		log.Printf("Не удалось отправить подтверждение: %v", err)
-		return
-	}
-
-	err = s.MessageReactionAdd(confirmMsg.ChannelID, confirmMsg.ID, "✅")
-	if err != nil {
-		log.Printf("Failed to add ✅: %v", err)
-	}
-	err = s.MessageReactionAdd(confirmMsg.ChannelID, confirmMsg.ID, "❌")
-	if err != nil {
-		log.Printf("Failed to add ❌: %v", err)
-	}
-
 	r.mu.Lock()
-	r.pendingCinemaBids[confirmMsg.ID] = PendingCinemaBid{
-		UserID: m.Author.ID,
-		IsNew:  true,
-		Name:   name,
-		Amount: amount,
+	defer r.mu.Unlock()
+
+	args := strings.Fields(command)
+	if len(args) < 3 {
+		s.ChannelMessageSend(m.ChannelID, "Использование: !cinema <название> <сумма>")
+		return
 	}
-	r.mu.Unlock()
+
+	amount, err := strconv.Atoi(args[len(args)-1])
+	if err != nil || amount <= 0 {
+		s.ChannelMessageSend(m.ChannelID, "Сумма должна быть положительным числом")
+		return
+	}
+
+	name := strings.Join(args[1:len(args)-1], " ")
+	if name == "" {
+		s.ChannelMessageSend(m.ChannelID, "Название фильма не может быть пустым")
+		return
+	}
+
+	// Проверка баланса пользователя
+	balance, err := r.redis.Get(r.ctx, "credits:"+m.Author.ID).Int()
+	if err == redis.Nil {
+		balance = 0
+	} else if err != nil {
+		log.Printf("Ошибка проверки баланса %s: %v", m.Author.ID, err)
+		s.ChannelMessageSend(m.ChannelID, "Ошибка при проверке баланса")
+		return
+	}
+	if balance < amount {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов. Ваш баланс: %d", balance))
+		return
+	}
+
+	// Создаём pending ставку
+	bidID := generateBidID(m.Author.ID)
+	pendingBid := PendingCinemaBid{
+		UserID:    m.Author.ID,
+		IsNew:     true,
+		Name:      name,
+		Amount:    amount,
+		MessageID: "", // Будет заполнено после отправки сообщения
+	}
+
+	// Отправляем сообщение с кнопками в CINEMA_CHANNEL_ID
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{
+					Label:    "Подтвердить",
+					Style:    discordgo.SuccessButton,
+					CustomID: "cinema_confirm_" + bidID,
+				},
+				discordgo.Button{
+					Label:    "Отклонить",
+					Style:    discordgo.DangerButton,
+					CustomID: "cinema_decline_" + bidID,
+				},
+			},
+		},
+	}
+
+	msg, err := s.ChannelMessageSendComplex(r.cinemaChannelID, &discordgo.MessageSend{
+		Content:    fmt.Sprintf("Новая ставка от <@%s>: фильм '%s', сумма %d. Подтвердите или отклоните:", m.Author.ID, name, amount),
+		Components: components,
+	})
+	if err != nil {
+		log.Printf("Ошибка отправки сообщения с кнопками: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
+		return
+	}
+
+	// Сохраняем ID сообщения
+	pendingBid.MessageID = msg.ID
+
+	// Сохраняем pending ставку в Redis
+	bidData, err := json.Marshal(pendingBid)
+	if err != nil {
+		log.Printf("Ошибка сериализации ставки: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
+		return
+	}
+	err = r.redis.Set(r.ctx, "pending_bid:"+bidID, bidData, 0).Err()
+	if err != nil {
+		log.Printf("Ошибка сохранения ставки в Redis: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
+		return
+	}
+
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Ваша ставка на '%s' (%d кредитов) отправлена на подтверждение", name, amount))
 }
 
 // HandleBetCinemaCommand обрабатывает !betcinema <номер> <сумма>.
 func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
-	log.Printf("Обработка !betcinema: %s от %s", command, m.Author.ID)
-	parts := strings.Fields(command)
-	if len(parts) != 3 {
-		s.ChannelMessageSend(m.ChannelID, "Используй: !betcinema <номер> <сумма>")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	args := strings.Fields(command)
+	if len(args) != 3 {
+		s.ChannelMessageSend(m.ChannelID, "Использование: !betcinema <номер> <сумма>")
 		return
 	}
-	indexStr := parts[1]
-	amountStr := parts[2]
-	index, err := strconv.Atoi(indexStr)
-	if err != nil || index <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "Неверный номер!")
+
+	index, err := strconv.Atoi(args[1])
+	if err != nil || index < 1 || index > len(r.cinemaOptions) {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Неверный номер варианта (доступно: 1-%d)", len(r.cinemaOptions)))
 		return
 	}
-	index-- // 0-based
-	amount, err := strconv.Atoi(amountStr)
+
+	amount, err := strconv.Atoi(args[2])
 	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "Сумма должна быть положительным числом!")
+		s.ChannelMessageSend(m.ChannelID, "Сумма должна быть положительным числом")
 		return
 	}
 
-	r.mu.Lock()
-	if index >= len(r.cinemaOptions) {
-		r.mu.Unlock()
-		s.ChannelMessageSend(m.ChannelID, "Неверный номер варианта!")
+	// Проверка баланса пользователя
+	balance, err := r.redis.Get(r.ctx, "credits:"+m.Author.ID).Int()
+	if err == redis.Nil {
+		balance = 0
+	} else if err != nil {
+		log.Printf("Ошибка проверки баланса %s: %v", m.Author.ID, err)
+		s.ChannelMessageSend(m.ChannelID, "Ошибка при проверке баланса")
 		return
 	}
-	name := r.cinemaOptions[index].Name
-	r.mu.Unlock()
-
-	userRating := r.GetRating(m.Author.ID)
-	if userRating < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов! Твой баланс: %d", userRating))
+	if balance < amount {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов. Ваш баланс: %d", balance))
 		return
 	}
 
-	confirmText := fmt.Sprintf("Добавить ставку %d на вариант \"%s\"?", amount, name)
-	confirmMsg, err := s.ChannelMessageSend(m.ChannelID, confirmText)
+	// Создаём pending ставку
+	bidID := generateBidID(m.Author.ID)
+	pendingBid := PendingCinemaBid{
+		UserID:    m.Author.ID,
+		IsNew:     false,
+		Index:     index - 1,
+		Amount:    amount,
+		MessageID: "",
+	}
+
+	// Отправляем сообщение с кнопками в CINEMA_CHANNEL_ID
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{
+					Label:    "Подтвердить",
+					Style:    discordgo.SuccessButton,
+					CustomID: "cinema_confirm_" + bidID,
+				},
+				discordgo.Button{
+					Label:    "Отклонить",
+					Style:    discordgo.DangerButton,
+					CustomID: "cinema_decline_" + bidID,
+				},
+			},
+		},
+	}
+
+	msg, err := s.ChannelMessageSendComplex(r.cinemaChannelID, &discordgo.MessageSend{
+		Content:    fmt.Sprintf("Ставка от <@%s> на вариант #%d (%s), сумма %d. Подтвердите или отклоните:", m.Author.ID, index, r.cinemaOptions[index-1].Name, amount),
+		Components: components,
+	})
 	if err != nil {
-		log.Printf("Не удалось отправить подтверждение: %v", err)
+		log.Printf("Ошибка отправки сообщения с кнопками: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
 		return
 	}
 
-	err = s.MessageReactionAdd(confirmMsg.ChannelID, confirmMsg.ID, "✅")
+	pendingBid.MessageID = msg.ID
+
+	// Сохраняем pending ставку в Redis
+	bidData, err := json.Marshal(pendingBid)
 	if err != nil {
-		log.Printf("Failed to add ✅: %v", err)
+		log.Printf("Ошибка сериализации ставки: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
+		return
 	}
-	err = s.MessageReactionAdd(confirmMsg.ChannelID, confirmMsg.ID, "❌")
+	err = r.redis.Set(r.ctx, "pending_bid:"+bidID, bidData, 0).Err()
 	if err != nil {
-		log.Printf("Failed to add ❌: %v", err)
+		log.Printf("Ошибка сохранения ставки в Redis: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Ошибка при создании ставки")
+		return
 	}
 
-	r.mu.Lock()
-	r.pendingCinemaBids[confirmMsg.ID] = PendingCinemaBid{
-		UserID: m.Author.ID,
-		IsNew:  false,
-		Index:  index,
-		Amount: amount,
-	}
-	r.mu.Unlock()
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Ваша ставка на '%s' (%d кредитов) отправлена на подтверждение", r.cinemaOptions[index-1].Name, amount))
 }
 
 // HandleCinemaListCommand обрабатывает !cinemalist (для всех).
@@ -372,4 +449,161 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 	r.mu.Unlock()
 
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ Обновлен total для \"%s\": %d", opt.Name, opt.Total))
+}
+
+func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	customID := i.MessageComponentData().CustomID
+	bidID := strings.Split(customID, "_")[2]
+
+	// Загружаем pending ставку
+	bidData, err := r.redis.Get(r.ctx, "pending_bid:"+bidID).Result()
+	if err == redis.Nil {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Ставка не найдена или уже обработана",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+	if err != nil {
+		log.Printf("Ошибка загрузки ставки %s: %v", bidID, err)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Ошибка при обработке ставки",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	var bid PendingCinemaBid
+	if err := json.Unmarshal([]byte(bidData), &bid); err != nil {
+		log.Printf("Ошибка десериализации ставки %s: %v", bidID, err)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Ошибка при обработке ставки",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	// Проверяем, что пользователь — автор ставки
+	if i.Member.User.ID != bid.UserID {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Только автор ставки может подтвердить или отклонить её",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if strings.HasPrefix(customID, "cinema_confirm_") {
+		// Подтверждение ставки
+		if bid.IsNew {
+			// Новая опция
+			r.cinemaOptions = append(r.cinemaOptions, CinemaOption{
+				Name:  bid.Name,
+				Total: bid.Amount,
+				Bets:  map[string]int{bid.UserID: bid.Amount},
+			})
+		} else {
+			// Существующая опция
+			if bid.Index >= len(r.cinemaOptions) {
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Content: "Вариант больше не существует",
+						Flags:   discordgo.MessageFlagsEphemeral,
+					},
+				})
+				return
+			}
+			r.cinemaOptions[bid.Index].Total += bid.Amount
+			r.cinemaOptions[bid.Index].Bets[bid.UserID] += bid.Amount
+		}
+
+		// Снимаем кредиты
+		err = r.redis.DecrBy(r.ctx, "credits:"+bid.UserID, int64(bid.Amount)).Err()
+		if err != nil {
+			log.Printf("Ошибка списания кредитов %s: %v", bid.UserID, err)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Ошибка при списании кредитов",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+
+		// Сохраняем обновлённые cinemaOptions
+		if err := r.SaveCinemaOptions(); err != nil {
+			log.Printf("Ошибка сохранения cinemaOptions: %v", err)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Ошибка при сохранении данных аукциона",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+
+		// Удаляем pending ставку
+		r.redis.Del(r.ctx, "pending_bid:"+bidID)
+
+		// Обновляем сообщение
+		content := fmt.Sprintf("Ставка от <@%s> на '%s' (%d кредитов) подтверждена", bid.UserID, bid.Name, bid.Amount)
+		components := []discordgo.MessageComponent{}
+		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel:    r.cinemaChannelID,
+			ID:         bid.MessageID,
+			Content:    &content,
+			Components: &components,
+		})
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Ставка подтверждена",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+
+		r.LogCreditOperation(s, fmt.Sprintf("Списано %d кредитов у <@%s> за ставку на '%s'", bid.Amount, bid.UserID, bid.Name))
+	} else if strings.HasPrefix(customID, "cinema_decline_") {
+		// Отклонение ставки
+		r.redis.Del(r.ctx, "pending_bid:"+bidID)
+
+		content := fmt.Sprintf("Ставка от <@%s> на '%s' (%d кредитов) отклонена", bid.UserID, bid.Name, bid.Amount)
+		components := []discordgo.MessageComponent{}
+		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel:    r.cinemaChannelID,
+			ID:         bid.MessageID,
+			Content:    &content,
+			Components: &components,
+		})
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Ставка отклонена",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+	}
+}
+
+func generateBidID(userID string) string {
+	return fmt.Sprintf("%s-%d", userID, time.Now().UnixNano())
 }
