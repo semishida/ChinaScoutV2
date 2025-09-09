@@ -799,11 +799,21 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 	}
 
 	log.Printf("Формирование таблицы для %d фильмов", len(r.cinemaOptions))
+
+	// Создаем копию для сортировки
+	sortedOptions := make([]CinemaOption, len(r.cinemaOptions))
+	copy(sortedOptions, r.cinemaOptions)
+
+	// Сортируем по убыванию (от большего к меньшему)
+	sort.Slice(sortedOptions, func(i, j int) bool {
+		return sortedOptions[i].Total > sortedOptions[j].Total
+	})
+
 	table := "```css\n"
 	table += fmt.Sprintf("%-5s %-40s %s\n", "#", "Фильм", "Кредиты")
 	table += strings.Repeat("-", 60) + "\n"
 
-	for i, option := range r.cinemaOptions {
+	for i, option := range sortedOptions {
 		if i >= 100 {
 			log.Printf("Достигнут лимит в 100 позиций")
 			break
@@ -1042,7 +1052,7 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock() // Важно: defer чтобы гарантировать разблокировку
+	defer r.mu.Unlock()
 
 	if len(r.cinemaOptions) == 0 {
 		log.Printf("Список cinemaOptions пуст")
@@ -1064,29 +1074,52 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 		count = len(r.cinemaOptions)
 	}
 
-	sortedOptions := make([]CinemaOption, len(r.cinemaOptions))
-	copy(sortedOptions, r.cinemaOptions)
-	sort.Slice(sortedOptions, func(i, j int) bool {
-		return sortedOptions[i].Total < sortedOptions[j].Total
+	// Создаем слайс с индексами и суммами для сортировки
+	type filmIndex struct {
+		index int
+		total int
+		name  string
+	}
+
+	films := make([]filmIndex, len(r.cinemaOptions))
+	for i, option := range r.cinemaOptions {
+		films[i] = filmIndex{index: i, total: option.Total, name: option.Name}
+	}
+
+	// Сортируем по возрастанию (от меньшего к большему)
+	sort.Slice(films, func(i, j int) bool {
+		return films[i].total < films[j].total
 	})
 
+	// Получаем индексы для удаления (первые count элементов)
+	indexesToRemove := make([]int, count)
 	removedFilms := make([]string, 0, count)
-	for _, option := range sortedOptions[:count] {
-		filmName := option.Name
+
+	for i := 0; i < count; i++ {
+		indexesToRemove[i] = films[i].index
+		filmName := films[i].name
 		if filmName == "" {
-			log.Printf("Пустое название фильма при удалении, замена на 'Неизвестный фильм'")
 			filmName = "Неизвестный фильм"
 		}
 		removedFilms = append(removedFilms, filmName)
-		for userID, amount := range option.Bets {
-			log.Printf("Возврат %d кредитов пользователю %s за фильм '%s'", amount, userID, filmName)
-			r.UpdateRating(userID, amount)
-			r.LogCreditOperation(s, fmt.Sprintf("Возвращено %d кредитов пользователю <@%s> за удаление фильма '%s'", amount, userID, filmName))
-		}
 	}
 
-	log.Printf("Удаление %d фильмов из cinemaOptions", count)
-	r.cinemaOptions = r.cinemaOptions[count:]
+	// Сортируем индексы в обратном порядке для безопасного удаления
+	sort.Sort(sort.Reverse(sort.IntSlice(indexesToRemove)))
+
+	// Удаляем фильмы и возвращаем кредиты
+	for _, index := range indexesToRemove {
+		option := r.cinemaOptions[index]
+		for userID, amount := range option.Bets {
+			log.Printf("Возврат %d кредитов пользователю %s за фильм '%s'", amount, userID, option.Name)
+			r.UpdateRating(userID, amount)
+			r.LogCreditOperation(s, fmt.Sprintf("Возвращено %d кредитов пользователю <@%s> за удаление фильма '%s'", amount, userID, option.Name))
+		}
+
+		// Удаляем элемент из слайса
+		r.cinemaOptions = append(r.cinemaOptions[:index], r.cinemaOptions[index+1:]...)
+	}
+
 	if err := r.SaveCinemaOptions(); err != nil {
 		log.Printf("Ошибка сохранения cinemaOptions: %v", err)
 		embed := &discordgo.MessageEmbed{
@@ -1105,7 +1138,7 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 	log.Printf("Формирование embed для удаленных фильмов: %v", removedFilms)
 	embed := &discordgo.MessageEmbed{
 		Title:       "🎥 Киноаукцион",
-		Description: fmt.Sprintf("🗑️ Удалено %d вариант(ов)", count),
+		Description: fmt.Sprintf("🗑️ Удалено %d вариант(ов) с наименьшим количеством кредитов", count),
 		Color:       randomColor(),
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "Удалённые фильмы", Value: strings.Join(removedFilms, ", "), Inline: false},
@@ -1114,7 +1147,7 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 		Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
-	log.Printf("Отправка сообщения об успешном удалении в канал %s", m.ChannelID)
+
 	if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
 		log.Printf("Ошибка отправки сообщения для !removelowest: %v", err)
 	} else {
@@ -1122,7 +1155,6 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 	}
 	log.Printf("Завершение обработки !removelowest")
 }
-
 func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Начало обработки !adjustcinema: %s от %s", command, m.Author.ID)
 
@@ -1244,7 +1276,6 @@ func generateBidID(userID string) string {
 	return fmt.Sprintf("%s-%d", userID, time.Now().UnixNano())
 }
 
-// splitLongMessage разбивает длинное сообщение на части, не превышающие maxLength символов
 func splitLongMessage(message string, maxLength int) ([]string, error) {
 	log.Printf("Разбиение сообщения длиной %d символов, maxLength: %d", len(message), maxLength)
 	if maxLength <= 0 {
