@@ -963,6 +963,126 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 	log.Printf("Завершение обработки !cinemalist")
 }
 
+func (r *Ranking) HandleAdminCinemaListCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	log.Printf("Начало обработки !admincinemalist для пользователя %s", m.Author.ID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.IsAdmin(m.Author.ID) {
+		log.Printf("Пользователь %s не админ", m.Author.ID)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Только админы могут просматривать детальный список",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !admincinemalist: %v", err)
+		}
+		return
+	}
+
+	if len(r.cinemaOptions) == 0 {
+		log.Printf("Список cinemaOptions пуст")
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "📋 Список фильмов пуст",
+			Color:       randomColor(),
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !admincinemalist: %v", err)
+		}
+		return
+	}
+
+	log.Printf("Формирование таблицы для %d фильмов", len(r.cinemaOptions))
+	table := "```css\n"
+	table += fmt.Sprintf("%-5s %-40s %-10s %s\n", "#", "Фильм", "Кредиты", "Ставки")
+	table += strings.Repeat("-", 80) + "\n"
+
+	for i, option := range r.cinemaOptions {
+		if i >= 100 {
+			log.Printf("Достигнут лимит в 100 позиций")
+			break
+		}
+		filmName := option.Name
+		if filmName == "" {
+			log.Printf("Пустое название фильма для позиции %d, замена на 'Неизвестный фильм'", i+1)
+			filmName = "Неизвестный фильм"
+		}
+		if len(filmName) > 37 {
+			filmName = filmName[:34] + "..."
+		}
+		bets := []string{}
+		for userID, amount := range option.Bets {
+			bets = append(bets, fmt.Sprintf("<@%s>: %d", userID, amount))
+		}
+		betsStr := strings.Join(bets, ", ")
+		if betsStr == "" {
+			betsStr = "Нет ставок"
+		}
+		if len(betsStr) > 100 {
+			betsStr = betsStr[:97] + "..."
+		}
+		table += fmt.Sprintf("%-5d %-40s %-10d %s\n", i+1, filmName, option.Total, betsStr)
+	}
+	table += "```"
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎥 Детальный список фильмов (админ)",
+		Description: fmt.Sprintf("📋 Текущие фильмы на аукционе (%d):\n%s", len(r.cinemaOptions), table),
+		Color:       randomColor(),
+		Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬 | Только для админов"},
+		Timestamp:   time.Now().Format(time.RFC3339),
+	}
+
+	log.Printf("Длина описания embed: %d символов", len(embed.Description))
+	if len(embed.Description) > 2000 {
+		log.Printf("Разбиение длинного сообщения")
+		parts, err := splitLongMessage(embed.Description, 1900)
+		if err != nil {
+			log.Printf("Ошибка разбиения сообщения для !admincinemalist: %v", err)
+			embed := &discordgo.MessageEmbed{
+				Title:       "🎥 Киноаукцион",
+				Description: "❌ Ошибка при формировании списка",
+				Color:       0xFF0000,
+				Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+				Timestamp:   time.Now().Format(time.RFC3339),
+			}
+			if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+				log.Printf("Ошибка отправки сообщения об ошибке для !admincinemalist: %v", err)
+			}
+			return
+		}
+		for i, part := range parts {
+			log.Printf("Отправка части %d из %d", i+1, len(parts))
+			partEmbed := &discordgo.MessageEmbed{
+				Title:       fmt.Sprintf("🎥 Детальный список фильмов (Часть %d)", i+1),
+				Description: part,
+				Color:       embed.Color,
+				Footer:      embed.Footer,
+				Timestamp:   embed.Timestamp,
+			}
+			if _, err := s.ChannelMessageSendEmbed(m.ChannelID, partEmbed); err != nil {
+				log.Printf("Ошибка отправки части %d для !admincinemalist: %v", i+1, err)
+			} else {
+				log.Printf("Часть %d успешно отправлена", i+1)
+			}
+		}
+	} else {
+		log.Printf("Отправка единого сообщения для !admincinemalist в канал %s", m.ChannelID)
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !admincinemalist: %v", err)
+		} else {
+			log.Printf("Сообщение успешно отправлено")
+		}
+	}
+	log.Printf("Завершение обработки !admincinemalist")
+}
+
 func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Начало обработки !removelowest: %s от %s", command, m.Author.ID)
 
