@@ -529,13 +529,14 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		for adminID := range r.admins {
 			adminTags += fmt.Sprintf("<@%s> ", adminID)
 		}
+		adminMsgContent := fmt.Sprintf("%s Пришла заявка от <@%s> на фильм \"%s\" %d очков.", adminTags, bid.UserID, bid.Name, bid.Amount)
 		adminEmbed := &discordgo.MessageEmbed{
-			Title:       "🎥 Новая ставка на киноаукцион",
-			Description: fmt.Sprintf("%s Подтвердите или отклоните ставку от <@%s>", adminTags, bid.UserID),
+			Title:       "🎥 Новая заявка на киноаукцион",
+			Description: "Подтвердите или отклоните заявку",
 			Color:       randomColor(),
 			Fields: []*discordgo.MessageEmbedField{
 				{Name: "Фильм", Value: bid.Name, Inline: true},
-				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d очков", bid.Amount), Inline: true},
 				{Name: "Пользователь", Value: fmt.Sprintf("<@%s>", bid.UserID), Inline: true},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
@@ -552,20 +553,22 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		}
 
 		adminMsg, err := s.ChannelMessageSendComplex(r.cinemaChannelID, &discordgo.MessageSend{
+			Content:    adminMsgContent,
 			Embed:      adminEmbed,
 			Components: adminComponents,
 		})
 		if err != nil {
 			log.Printf("Ошибка отправки сообщения админам: %v", err)
-			r.UpdateRating(bid.UserID, bid.Amount) // Возвращаем кредиты
+			r.UpdateRating(bid.UserID, bid.Amount) // Возврат кредитов
 			r.redis.Del(r.ctx, "pending_bid:"+bidID)
 			userEmbed := &discordgo.MessageEmbed{
 				Title:       "🎥 Киноаукцион",
-				Description: "❌ Ошибка при отправке ставки админам. Деньги возвращены.",
+				Description: "❌ Ошибка при отправке заявки админам. Кредиты возвращены.",
 				Color:       0xFF0000,
 				Fields: []*discordgo.MessageEmbedField{
 					{Name: "Фильм", Value: bid.Name, Inline: true},
-					{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+					{Name: "Сумма", Value: fmt.Sprintf("%d очков", bid.Amount), Inline: true},
+					{Name: "Новый баланс", Value: fmt.Sprintf("%d очков", r.GetRating(bid.UserID)), Inline: true},
 				},
 				Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 				Timestamp: time.Now().Format(time.RFC3339),
@@ -574,7 +577,7 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: "❌ Ошибка при отправке ставки админам",
+					Content: "❌ Ошибка при отправке заявки админам",
 					Flags:   discordgo.MessageFlagsEphemeral,
 				},
 			})
@@ -586,26 +589,26 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		bidData, err := json.Marshal(bid)
 		if err != nil {
 			log.Printf("Ошибка сериализации ставки: %v", err)
-			r.UpdateRating(bid.UserID, bid.Amount) // Возвращаем кредиты
+			r.UpdateRating(bid.UserID, bid.Amount) // Возврат кредитов
 			r.redis.Del(r.ctx, "pending_bid:"+bidID)
 			return
 		}
 		err = r.redis.Set(r.ctx, "pending_bid:"+bidID, bidData, 0).Err()
 		if err != nil {
 			log.Printf("Ошибка сохранения ставки в Redis: %v", err)
-			r.UpdateRating(bid.UserID, bid.Amount) // Возвращаем кредиты
+			r.UpdateRating(bid.UserID, bid.Amount) // Возврат кредитов
 			r.redis.Del(r.ctx, "pending_bid:"+bidID)
 			return
 		}
 
 		userEmbed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
-			Description: "✅ Ставка подтверждена и отправлена админам. Кредиты заморожены.",
+			Description: "✅ Заявка отправлена админам. Кредиты заморожены.",
 			Color:       0x00FF00,
 			Fields: []*discordgo.MessageEmbedField{
 				{Name: "Фильм", Value: bid.Name, Inline: true},
-				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
-				{Name: "Новый баланс", Value: fmt.Sprintf("%d кредитов", r.GetRating(bid.UserID)), Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d очков", bid.Amount), Inline: true},
+				{Name: "Новый баланс", Value: fmt.Sprintf("%d очков", r.GetRating(bid.UserID)), Inline: true},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp: time.Now().Format(time.RFC3339),
@@ -621,22 +624,22 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Ставка подтверждена",
+				Content: "✅ Заявка подтверждена",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
 
-		r.LogCreditOperation(s, fmt.Sprintf("Заморожено %d кредитов у <@%s> за ставку на '%s'", bid.Amount, bid.UserID, bid.Name))
+		r.LogCreditOperation(s, fmt.Sprintf("Заморожено %d очков у <@%s> за заявку на '%s'", bid.Amount, bid.UserID, bid.Name))
 	} else if action == "user_decline" {
 		r.redis.Del(r.ctx, "pending_bid:"+bidID)
 
 		userEmbed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
-			Description: "❌ Ставка отменена",
+			Description: "❌ Заявка отменена",
 			Color:       0xFF0000,
 			Fields: []*discordgo.MessageEmbedField{
 				{Name: "Фильм", Value: bid.Name, Inline: true},
-				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d очков", bid.Amount), Inline: true},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp: time.Now().Format(time.RFC3339),
@@ -652,7 +655,7 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Ставка отменена",
+				Content: "❌ Заявка отменена",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -694,11 +697,11 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 
 		adminEmbed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
-			Description: "✅ Ставка принята",
+			Description: "✅ Заявка принята",
 			Color:       0x00FF00,
 			Fields: []*discordgo.MessageEmbedField{
 				{Name: "Фильм", Value: bid.Name, Inline: true},
-				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d очков", bid.Amount), Inline: true},
 				{Name: "Пользователь", Value: fmt.Sprintf("<@%s>", bid.UserID), Inline: true},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
@@ -715,32 +718,32 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Ставка принята",
+				Content: "✅ Заявка принята",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
 
 		userEmbed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
-			Description: fmt.Sprintf("✅ Ваша ставка на '%s' (%d кредитов) принята админами!", bid.Name, bid.Amount),
+			Description: fmt.Sprintf("✅ Ваша заявка на '%s' (%d очков) принята админами!", bid.Name, bid.Amount),
 			Color:       0x00FF00,
 			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp:   time.Now().Format(time.RFC3339),
 		}
 		s.ChannelMessageSendEmbed(r.floodChannelID, userEmbed)
 
-		r.LogCreditOperation(s, fmt.Sprintf("Ставка %d кредитов от <@%s> на '%s' принята", bid.Amount, bid.UserID, bid.Name))
+		r.LogCreditOperation(s, fmt.Sprintf("Заявка %d очков от <@%s> на '%s' принята", bid.Amount, bid.UserID, bid.Name))
 	} else if action == "admin_reject" {
 		r.UpdateRating(bid.UserID, bid.Amount)
 		r.redis.Del(r.ctx, "pending_bid:"+bidID)
 
 		adminEmbed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
-			Description: "❌ Ставка отклонена, кредиты возвращены",
+			Description: "❌ Заявка отклонена, очки возвращены",
 			Color:       0xFF0000,
 			Fields: []*discordgo.MessageEmbedField{
 				{Name: "Фильм", Value: bid.Name, Inline: true},
-				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d очков", bid.Amount), Inline: true},
 				{Name: "Пользователь", Value: fmt.Sprintf("<@%s>", bid.UserID), Inline: true},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
@@ -757,24 +760,24 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Ставка отклонена",
+				Content: "❌ Заявка отклонена",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
 
 		userEmbed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
-			Description: fmt.Sprintf("❌ Ваша ставка на '%s' (%d кредитов) отклонена админами. Кредиты возвращены.", bid.Name, bid.Amount),
+			Description: fmt.Sprintf("❌ Ваша заявка на '%s' (%d очков) отклонена админами. Очки возвращены.", bid.Name, bid.Amount),
 			Color:       0xFF0000,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Новый баланс", Value: fmt.Sprintf("%d кредитов", r.GetRating(bid.UserID)), Inline: true},
+				{Name: "Новый баланс", Value: fmt.Sprintf("%d очков", r.GetRating(bid.UserID)), Inline: true},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp: time.Now().Format(time.RFC3339),
 		}
 		s.ChannelMessageSendEmbed(r.floodChannelID, userEmbed)
 
-		r.LogCreditOperation(s, fmt.Sprintf("Возвращено %d кредитов <@%s> за отклонённую ставку на '%s'", bid.Amount, bid.UserID, bid.Name))
+		r.LogCreditOperation(s, fmt.Sprintf("Возвращено %d очков <@%s> за отклонённую заявку на '%s'", bid.Amount, bid.UserID, bid.Name))
 	}
 }
 
