@@ -841,29 +841,41 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 		return sortedOptions[i].Total > sortedOptions[j].Total
 	})
 
-	// Создаем компактную таблицу
+	// Создаем таблицу с двумя колонками
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("**🎬 Топ фильмов (%d)**\n\n", len(r.cinemaOptions)))
 
-	for i, option := range sortedOptions {
-		if i >= 30 { // Ограничим до 30 фильмов
-			remaining := len(sortedOptions) - 30
-			builder.WriteString(fmt.Sprintf("\n... и ещё %d фильмов", remaining))
-			break
+	// Разделяем на две колонки
+	half := (len(sortedOptions) + 1) / 2
+
+	for i := 0; i < half; i++ {
+		// Левая колонка
+		if i < len(sortedOptions) {
+			option1 := sortedOptions[i]
+			filmName1 := option1.Name
+			if filmName1 == "" {
+				filmName1 = "Неизвестный"
+			}
+			// Более короткое обрезание названий
+			if len(filmName1) > 18 {
+				filmName1 = filmName1[:15] + "..."
+			}
+			builder.WriteString(fmt.Sprintf("`%2d.` %-18s `%6d`", i+1, filmName1, option1.Total))
 		}
 
-		filmName := option.Name
-		if filmName == "" {
-			filmName = "Неизвестный фильм"
+		// Правая колонка (если есть)
+		if i+half < len(sortedOptions) {
+			option2 := sortedOptions[i+half]
+			filmName2 := option2.Name
+			if filmName2 == "" {
+				filmName2 = "Неизвестный"
+			}
+			if len(filmName2) > 18 {
+				filmName2 = filmName2[:15] + "..."
+			}
+			builder.WriteString(fmt.Sprintf("   `%2d.` %-18s `%6d`", i+half+1, filmName2, option2.Total))
 		}
-
-		// Обрезаем слишком длинные названия более аккуратно
-		if len(filmName) > 25 {
-			filmName = filmName[:22] + "..."
-		}
-
-		// Компактный формат: #номер. Название - кредиты
-		builder.WriteString(fmt.Sprintf("`%2d.` **%-25s** `%7d`\n", i+1, filmName, option.Total))
+		builder.WriteString("\n")
 	}
 
 	embed := &discordgo.MessageEmbed{
@@ -887,19 +899,22 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 	if len(embed.Description) > 2000 {
 		log.Printf("Сообщение слишком длинное, разбиваем на части")
 
-		// Первая часть - топ 15
+		// Первая часть - первая половина
 		builder1 := strings.Builder{}
 		builder1.WriteString(fmt.Sprintf("**🎬 Топ фильмов (%d) - Часть 1/2**\n\n", len(r.cinemaOptions)))
-		for i := 0; i < 15 && i < len(sortedOptions); i++ {
-			option := sortedOptions[i]
-			filmName := option.Name
-			if filmName == "" {
-				filmName = "Неизвестный фильм"
+
+		for i := 0; i < half && i < 15; i++ {
+			if i < len(sortedOptions) {
+				option := sortedOptions[i]
+				filmName := option.Name
+				if filmName == "" {
+					filmName = "Неизвестный"
+				}
+				if len(filmName) > 25 {
+					filmName = filmName[:22] + "..."
+				}
+				builder1.WriteString(fmt.Sprintf("`%2d.` %-25s `%7d`\n", i+1, filmName, option.Total))
 			}
-			if len(filmName) > 25 {
-				filmName = filmName[:22] + "..."
-			}
-			builder1.WriteString(fmt.Sprintf("`%2d.` **%-25s** `%7d`\n", i+1, filmName, option.Total))
 		}
 
 		embed1 := &discordgo.MessageEmbed{
@@ -910,23 +925,25 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 			Timestamp:   time.Now().Format(time.RFC3339),
 		}
 
-		// Вторая часть - остальные
+		// Вторая часть - вторая половина
 		builder2 := strings.Builder{}
 		builder2.WriteString(fmt.Sprintf("**🎬 Топ фильмов (%d) - Часть 2/2**\n\n", len(r.cinemaOptions)))
-		for i := 15; i < len(sortedOptions) && i < 30; i++ {
+
+		start := half
+		if start > 15 {
+			start = 15
+		}
+
+		for i := start; i < len(sortedOptions); i++ {
 			option := sortedOptions[i]
 			filmName := option.Name
 			if filmName == "" {
-				filmName = "Неизвестный фильм"
+				filmName = "Неизвестный"
 			}
 			if len(filmName) > 25 {
 				filmName = filmName[:22] + "..."
 			}
-			builder2.WriteString(fmt.Sprintf("`%2d.` **%-25s** `%7d`\n", i+1, filmName, option.Total))
-		}
-
-		if len(sortedOptions) > 30 {
-			builder2.WriteString(fmt.Sprintf("\n... и ещё %d фильмов", len(sortedOptions)-30))
+			builder2.WriteString(fmt.Sprintf("`%2d.` %-25s `%7d`\n", i+1, filmName, option.Total))
 		}
 
 		embed2 := &discordgo.MessageEmbed{
@@ -948,7 +965,7 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed1); err != nil {
 			log.Printf("Ошибка отправки части 1: %v", err)
 		}
-		time.Sleep(500 * time.Millisecond) // Небольшая задержка
+		time.Sleep(500 * time.Millisecond)
 		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed2); err != nil {
 			log.Printf("Ошибка отправки части 2: %v", err)
 		}
