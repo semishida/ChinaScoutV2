@@ -197,7 +197,7 @@ func (r *Ranking) HandleCinemaCommand(s *discordgo.Session, m *discordgo.Message
 		},
 	}
 
-	msg, err := s.ChannelMessageSendComplex(r.floodChannelID, &discordgo.MessageSend{
+	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
 		Embed:      embed,
 		Components: components,
 		Reference:  m.Reference(),
@@ -368,7 +368,7 @@ func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.Mess
 		},
 	}
 
-	msg, err := s.ChannelMessageSendComplex(r.floodChannelID, &discordgo.MessageSend{
+	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
 		Embed:      embed,
 		Components: components,
 		Reference:  m.Reference(),
@@ -510,7 +510,7 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 				Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 				Timestamp: time.Now().Format(time.RFC3339),
 			}
-			s.ChannelMessageEditEmbed(r.floodChannelID, bid.UserMessageID, userEmbed)
+			s.ChannelMessageEditEmbed(i.ChannelID, bid.UserMessageID, userEmbed)
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -524,19 +524,22 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		// Замораживаем кредиты
 		r.UpdateRating(bid.UserID, -bid.Amount)
 
-		// Формируем уведомление для админов
+		// Уведомляем админов в админ-чате
 		adminTags := ""
 		for adminID := range r.admins {
 			adminTags += fmt.Sprintf("<@%s> ", adminID)
 		}
-		adminMessage := fmt.Sprintf("%s Пришла заявка от <@%s> на фильм \"%s\" %d очков.", adminTags, bid.UserID, bid.Name, bid.Amount)
-
 		adminEmbed := &discordgo.MessageEmbed{
 			Title:       "🎥 Новая ставка на киноаукцион",
-			Description: adminMessage,
+			Description: fmt.Sprintf("%s Пришла заявка от <@%s> на фильм \"%s\" %d кредитов", adminTags, bid.UserID, bid.Name, bid.Amount),
 			Color:       randomColor(),
-			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
-			Timestamp:   time.Now().Format(time.RFC3339),
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Фильм", Value: bid.Name, Inline: true},
+				{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", bid.Amount), Inline: true},
+				{Name: "Пользователь", Value: fmt.Sprintf("<@%s>", bid.UserID), Inline: true},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
 		}
 
 		adminComponents := []discordgo.MessageComponent{
@@ -567,7 +570,7 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 				Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 				Timestamp: time.Now().Format(time.RFC3339),
 			}
-			s.ChannelMessageEditEmbed(r.floodChannelID, bid.UserMessageID, userEmbed)
+			s.ChannelMessageEditEmbed(i.ChannelID, bid.UserMessageID, userEmbed)
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -609,7 +612,7 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		}
 
 		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
-			Channel:    r.floodChannelID,
+			Channel:    i.ChannelID,
 			ID:         bid.UserMessageID,
 			Embed:      userEmbed,
 			Components: &[]discordgo.MessageComponent{},
@@ -640,7 +643,7 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 		}
 
 		s.ChannelMessageEditComplex(&discordgo.MessageEdit{
-			Channel:    r.floodChannelID,
+			Channel:    i.ChannelID,
 			ID:         bid.UserMessageID,
 			Embed:      userEmbed,
 			Components: &[]discordgo.MessageComponent{},
