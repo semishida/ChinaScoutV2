@@ -1155,6 +1155,7 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 	}
 	log.Printf("Завершение обработки !removelowest")
 }
+
 func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Начало обработки !adjustcinema: %s от %s", command, m.Author.ID)
 
@@ -1193,14 +1194,46 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock() // Важно: defer чтобы гарантировать разблокировку
+	defer r.mu.Unlock()
+
+	// Создаем отсортированную копию для определения правильного индекса
+	sortedOptions := make([]CinemaOption, len(r.cinemaOptions))
+	copy(sortedOptions, r.cinemaOptions)
+	sort.Slice(sortedOptions, func(i, j int) bool {
+		return sortedOptions[i].Total > sortedOptions[j].Total
+	})
 
 	index, err := strconv.Atoi(args[1])
-	if err != nil || index < 1 || index > len(r.cinemaOptions) {
-		log.Printf("Неверный номер варианта: %s, доступно: %d фильмов", args[1], len(r.cinemaOptions))
+	if err != nil || index < 1 || index > len(sortedOptions) {
+		log.Printf("Неверный номер варианта: %s, доступно: %d фильмов", args[1], len(sortedOptions))
 		embed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
-			Description: fmt.Sprintf("❌ Неверный номер варианта (доступно: 1-%d)", len(r.cinemaOptions)),
+			Description: fmt.Sprintf("❌ Неверный номер варианта (доступно: 1-%d)", len(sortedOptions)),
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !adjustcinema: %v", err)
+		}
+		return
+	}
+
+	// Находим соответствующий фильм в оригинальном массиве
+	filmToAdjust := sortedOptions[index-1]
+	var originalIndex int = -1
+	for i, option := range r.cinemaOptions {
+		if option.Name == filmToAdjust.Name && option.Total == filmToAdjust.Total {
+			originalIndex = i
+			break
+		}
+	}
+
+	if originalIndex == -1 {
+		log.Printf("Не удалось найти фильм в оригинальном массиве: %s", filmToAdjust.Name)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка: не удалось найти фильм для корректировки",
 			Color:       0xFF0000,
 			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp:   time.Now().Format(time.RFC3339),
@@ -1228,16 +1261,16 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 		return
 	}
 
-	oldTotal := r.cinemaOptions[index-1].Total
-	r.cinemaOptions[index-1].Total += adjustment
-	if r.cinemaOptions[index-1].Total < 0 {
+	oldTotal := r.cinemaOptions[originalIndex].Total
+	r.cinemaOptions[originalIndex].Total += adjustment
+	if r.cinemaOptions[originalIndex].Total < 0 {
 		log.Printf("Корректировка привела к отрицательной сумме, установка в 0 для варианта #%d", index)
-		r.cinemaOptions[index-1].Total = 0
+		r.cinemaOptions[originalIndex].Total = 0
 	}
 
 	if err := r.SaveCinemaOptions(); err != nil {
 		log.Printf("Ошибка сохранения cinemaOptions: %v", err)
-		r.cinemaOptions[index-1].Total = oldTotal // Откатываем изменения
+		r.cinemaOptions[originalIndex].Total = oldTotal // Откатываем изменения
 		embed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
 			Description: "❌ Ошибка при сохранении данных аукциона",
@@ -1251,15 +1284,15 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 		return
 	}
 
-	log.Printf("Корректировка завершена для варианта #%d (%s), старая сумма: %d, новая сумма: %d", index, r.cinemaOptions[index-1].Name, oldTotal, r.cinemaOptions[index-1].Total)
+	log.Printf("Корректировка завершена для варианта #%d (%s), старая сумма: %d, новая сумма: %d", index, filmToAdjust.Name, oldTotal, r.cinemaOptions[originalIndex].Total)
 	embed := &discordgo.MessageEmbed{
 		Title:       "🎥 Киноаукцион",
 		Description: fmt.Sprintf("⚙️ Вариант #%d скорректирован", index),
 		Color:       randomColor(),
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Фильм", Value: r.cinemaOptions[index-1].Name, Inline: true},
+			{Name: "Фильм", Value: filmToAdjust.Name, Inline: true},
 			{Name: "Корректировка", Value: adjustmentStr, Inline: true},
-			{Name: "Новая сумма", Value: fmt.Sprintf("%d кредитов", r.cinemaOptions[index-1].Total), Inline: true},
+			{Name: "Новая сумма", Value: fmt.Sprintf("%d кредитов", r.cinemaOptions[originalIndex].Total), Inline: true},
 		},
 		Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 		Timestamp: time.Now().Format(time.RFC3339),
