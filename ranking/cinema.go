@@ -259,12 +259,44 @@ func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.Mess
 		return
 	}
 
+	// Создаем отсортированную копию для определения правильного индекса
+	sortedOptions := make([]CinemaOption, len(r.cinemaOptions))
+	copy(sortedOptions, r.cinemaOptions)
+	sort.Slice(sortedOptions, func(i, j int) bool {
+		return sortedOptions[i].Total > sortedOptions[j].Total
+	})
+
 	index, err := strconv.Atoi(args[1])
-	if err != nil || index < 1 || index > len(r.cinemaOptions) {
-		log.Printf("Неверный номер варианта: %s, доступно: %d фильмов", args[1], len(r.cinemaOptions))
+	if err != nil || index < 1 || index > len(sortedOptions) {
+		log.Printf("Неверный номер варианта: %s, доступно: %d фильмов", args[1], len(sortedOptions))
 		embed := &discordgo.MessageEmbed{
 			Title:       "🎥 Киноаукцион",
-			Description: fmt.Sprintf("❌ Неверный номер варианта (доступно: 1-%d)", len(r.cinemaOptions)),
+			Description: fmt.Sprintf("❌ Неверный номер варианта (доступно: 1-%d)", len(sortedOptions)),
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !betcinema: %v", err)
+		}
+		return
+	}
+
+	// Находим соответствующий фильм в оригинальном массиве
+	selectedFilm := sortedOptions[index-1]
+	var originalIndex int = -1
+	for i, option := range r.cinemaOptions {
+		if option.Name == selectedFilm.Name && option.Total == selectedFilm.Total {
+			originalIndex = i
+			break
+		}
+	}
+
+	if originalIndex == -1 {
+		log.Printf("Не удалось найти фильм в оригинальном массиве: %s", selectedFilm.Name)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка: не удалось найти фильм для ставки",
 			Color:       0xFF0000,
 			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp:   time.Now().Format(time.RFC3339),
@@ -311,7 +343,7 @@ func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.Mess
 	pendingBid := PendingCinemaBid{
 		UserID: m.Author.ID,
 		IsNew:  false,
-		Index:  index - 1,
+		Index:  originalIndex, // Используем оригинальный индекс
 		Amount: amount,
 	}
 
@@ -351,7 +383,7 @@ func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.Mess
 		Description: "Подтвердите вашу ставку",
 		Color:       randomColor(),
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Фильм", Value: r.cinemaOptions[index-1].Name, Inline: true},
+			{Name: "Фильм", Value: selectedFilm.Name, Inline: true},
 			{Name: "Сумма", Value: fmt.Sprintf("%d кредитов", amount), Inline: true},
 			{Name: "Пользователь", Value: fmt.Sprintf("<@%s>", m.Author.ID), Inline: true},
 		},
@@ -403,7 +435,7 @@ func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.Mess
 		return
 	}
 
-	log.Printf("Ставка успешно создана, bidID: %s, фильм: %s, сумма: %d", bidID, r.cinemaOptions[index-1].Name, amount)
+	log.Printf("Ставка успешно создана, bidID: %s, фильм: %s, сумма: %d", bidID, selectedFilm.Name, amount)
 }
 
 func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -809,72 +841,85 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 		return sortedOptions[i].Total > sortedOptions[j].Total
 	})
 
-	table := "```css\n"
-	table += fmt.Sprintf("%-5s %-40s %s\n", "#", "Фильм", "Кредиты")
-	table += strings.Repeat("-", 60) + "\n"
+	// Создаем красивую таблицу с эмодзи и лучшим форматированием
+	description := fmt.Sprintf("## 🎬 Текущие фильмы на аукционе (%d)\n\n", len(r.cinemaOptions))
 
 	for i, option := range sortedOptions {
-		if i >= 100 {
-			log.Printf("Достигнут лимит в 100 позиций")
+		if i >= 50 { // Ограничим до 50 фильмов чтобы не превысить лимит символов
+			description += "\n*... и ещё несколько фильмов*"
 			break
 		}
+
 		filmName := option.Name
 		if filmName == "" {
-			log.Printf("Пустое название фильма для позиции %d, замена на 'Неизвестный фильм'", i+1)
 			filmName = "Неизвестный фильм"
 		}
-		if len(filmName) > 37 {
-			filmName = filmName[:34] + "..."
+
+		// Обрезаем слишком длинные названия
+		if len(filmName) > 35 {
+			filmName = filmName[:32] + "..."
 		}
-		table += fmt.Sprintf("%-5d %-40s %d\n", i+1, filmName, option.Total)
+
+		// Добавляем красивый номер с эмодзи
+		medal := "🎬"
+		if i == 0 {
+			medal = "🥇"
+		} else if i == 1 {
+			medal = "🥈"
+		} else if i == 2 {
+			medal = "🥉"
+		}
+
+		description += fmt.Sprintf("%s **#%d** | `%s`\n", medal, i+1, filmName)
+		description += fmt.Sprintf("   💰 **%d кредитов**\n", option.Total)
+
+		// Добавляем разделитель между фильмами
+		if i < len(sortedOptions)-1 && i < 49 {
+			description += "➖➖➖➖➖➖➖➖➖➖\n"
+		}
 	}
-	table += "```"
 
 	embed := &discordgo.MessageEmbed{
-		Title:       "🎥 Список фильмов",
-		Description: fmt.Sprintf("📋 Текущие фильмы на аукционе (%d):\n%s", len(r.cinemaOptions), table),
-		Color:       randomColor(),
-		Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
-		Timestamp:   time.Now().Format(time.RFC3339),
+		Title:       "🎥 КИНОАУКЦИОН",
+		Description: description,
+		Color:       0x1E90FF, // Красивый синий цвет
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "ℹ️ Как сделать ставку",
+				Value:  "Используй `!betcinema <номер> <сумма>` для ставки на существующий фильм\nИли `!cinema <название> <сумма>` для добавления нового фильма",
+				Inline: false,
+			},
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text:    "🎬 Киноаукцион • Сортировка по количеству кредитов",
+			IconURL: "https://cdn.discordapp.com/emojis/🎬.png",
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+		Thumbnail: &discordgo.MessageEmbedThumbnail{
+			URL: "https://cdn.discordapp.com/emojis/🎥.png",
+		},
 	}
 
-	log.Printf("Длина описания embed: %d символов", len(embed.Description))
-	if len(embed.Description) > 2000 {
-		log.Printf("Разбиение длинного сообщения")
-		parts, err := splitLongMessage(embed.Description, 1900)
-		if err != nil {
-			log.Printf("Ошибка разбиения сообщения для !cinemalist: %v", err)
-			errorEmbed := &discordgo.MessageEmbed{
-				Title:       "🎥 Киноаукцион",
-				Description: "❌ Ошибка при формировании списка",
-				Color:       0xFF0000,
-				Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+	// Отправляем сообщение
+	if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+		log.Printf("Ошибка отправки сообщения для !cinemalist: %v", err)
+
+		// Если не получилось из-за длины, попробуем разбить
+		if len(embed.Description) > 2000 {
+			log.Printf("Сообщение слишком длинное, пробуем разбить")
+			simpleEmbed := &discordgo.MessageEmbed{
+				Title:       "🎥 Список фильмов",
+				Description: "📋 Фильмы отсортированы по количеству кредитов (от большего к меньшему)",
+				Color:       randomColor(),
+				Footer:      &discordgo.MessageEmbedFooter{Text: "Используй !admincinemalist для детального просмотра"},
 				Timestamp:   time.Now().Format(time.RFC3339),
 			}
-			if _, err := s.ChannelMessageSendEmbed(m.ChannelID, errorEmbed); err != nil {
-				log.Printf("Ошибка отправки сообщения об ошибке для !cinemalist: %v", err)
+			if _, err := s.ChannelMessageSendEmbed(m.ChannelID, simpleEmbed); err != nil {
+				log.Printf("Ошибка отправки упрощенного сообщения: %v", err)
 			}
-			return
-		}
-		for i, part := range parts {
-			log.Printf("Отправка части %d из %d", i+1, len(parts))
-			partEmbed := &discordgo.MessageEmbed{
-				Title:       fmt.Sprintf("🎥 Список фильмов (Часть %d)", i+1),
-				Description: part,
-				Color:       embed.Color,
-				Footer:      embed.Footer,
-				Timestamp:   embed.Timestamp,
-			}
-			if _, err := s.ChannelMessageSendEmbed(m.ChannelID, partEmbed); err != nil {
-				log.Printf("Ошибка отправки части %d для !cinemalist: %v", i+1, err)
-			}
-		}
-	} else {
-		log.Printf("Отправка единого сообщения для !cinemalist")
-		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
-			log.Printf("Ошибка отправки сообщения для !cinemalist: %v", err)
 		}
 	}
+
 	log.Printf("Завершение обработки !cinemalist")
 }
 
