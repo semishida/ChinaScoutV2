@@ -1124,8 +1124,6 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 
 func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Начало обработки !adjustcinema: %s от %s", command, m.Author.ID)
-	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	if !r.IsAdmin(m.Author.ID) {
 		log.Printf("Пользователь %s не админ", m.Author.ID)
@@ -1160,6 +1158,9 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 		}
 		return
 	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock() // Важно: defer чтобы гарантировать разблокировку
 
 	index, err := strconv.Atoi(args[1])
 	if err != nil || index < 1 || index > len(r.cinemaOptions) {
