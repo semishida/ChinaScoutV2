@@ -990,8 +990,6 @@ func (r *Ranking) HandleAdminCinemaListCommand(s *discordgo.Session, m *discordg
 
 func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Начало обработки !removelowest: %s от %s", command, m.Author.ID)
-	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	if !r.IsAdmin(m.Author.ID) {
 		log.Printf("Пользователь %s не админ", m.Author.ID)
@@ -1042,6 +1040,9 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 		}
 		return
 	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock() // Важно: defer чтобы гарантировать разблокировку
 
 	if len(r.cinemaOptions) == 0 {
 		log.Printf("Список cinemaOptions пуст")
