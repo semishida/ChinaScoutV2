@@ -362,29 +362,29 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!buy_case_from "):
 		log.Printf("Matched !buy_case_from")
 		rank.HandleBuyCaseFromCommand(s, m, command)
-	case strings.HasPrefix(command, "!admin_give_case "):
+	case strings.HasPrefix(command, "!a_give_case "):
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !admin_give_case")
+		log.Printf("Matched !a_give_case")
 		rank.HandleAdminGiveCase(s, m, command)
-	case strings.HasPrefix(command, "!admin_give_nft "):
+	case strings.HasPrefix(command, "!a_give_nft "):
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !admin_give_nft")
+		log.Printf("Matched !a_give_nft")
 		rank.HandleAdminGiveNFT(s, m, command)
-	case strings.HasPrefix(command, "!admin_remove_nft "):
+	case strings.HasPrefix(command, "!a_remove_nft "):
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !admin_remove_nft")
+		log.Printf("Matched !a_remove_nft")
 		rank.HandleAdminRemoveNFT(s, m, command)
-	case strings.HasPrefix(command, "!admin_holiday_case "):
+	case strings.HasPrefix(command, "!a_holiday_case "):
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !admin_holiday_case")
+		log.Printf("Matched !a_holiday_case")
 		rank.HandleAdminHolidayCase(s, m, command)
 	case strings.HasPrefix(command, "!show_nft "):
 		log.Printf("Matched !show_nft")
@@ -395,6 +395,9 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 		}
 		log.Printf("Matched !test_clear_all_nfts")
 		rank.ClearAllUserNFTs(s, m)
+	case strings.HasPrefix(command, "!admin"):
+		log.Printf("Matched !admin")
+		rank.HandleAdminCommand(s, m, m.Content)
 	default:
 		log.Printf("No match for command: %s", command)
 	}
