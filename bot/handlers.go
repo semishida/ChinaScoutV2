@@ -50,7 +50,7 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 				for _, attachment := range m.Attachments {
 					caption := fmt.Sprintf("\n%s:", m.Author.Username)
 					if m.Content != "" {
-						caption = fmt.Sprintf("%n%s: %s", m.Author.Username, m.Content)
+						caption = fmt.Sprintf("\n%s: %s", m.Author.Username, m.Content)
 					}
 
 					filePath := fmt.Sprintf("content/file_%d_%s", time.Now().UnixNano(), attachment.Filename)
@@ -333,6 +333,68 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!transfer"):
 		log.Printf("Matched !transfer")
 		rank.HandleTransferCommand(s, m, m.Content)
+	case strings.HasPrefix(command, "!sync_nfts"):
+		if !rank.IsAdmin(m.Author.ID) {
+			return
+		}
+		log.Printf("Matched !sync_nfts")
+		err := rank.Kki.SyncFromSheets(rank)
+		if err != nil {
+			s.ChannelMessageSend(m.ChannelID, "Ошибка синхронизации: "+err.Error())
+		} else {
+			s.ChannelMessageSend(m.ChannelID, "NFT и кейсы синхронизированы из Google Sheets!")
+		}
+	case command == "!inventory":
+		log.Printf("Matched !inventory")
+		rank.HandleInventoryCommand(s, m)
+	case strings.HasPrefix(command, "!sell "):
+		log.Printf("Matched !sell")
+		rank.HandleSellCommand(s, m, command)
+	case strings.HasPrefix(command, "!transfer_nft "):
+		log.Printf("Matched !transfer_nft")
+		rank.HandleTransferNFTCommand(s, m, command)
+	case strings.HasPrefix(command, "!open_case "):
+		log.Printf("Matched !open_case")
+		rank.HandleOpenCaseCommand(s, m, command)
+	case command == "!daily_case":
+		log.Printf("Matched !daily_case")
+		rank.HandleDailyCaseCommand(s, m)
+	case strings.HasPrefix(command, "!buy_case_from "):
+		log.Printf("Matched !buy_case_from")
+		rank.HandleBuyCaseFromCommand(s, m, command)
+	case strings.HasPrefix(command, "!admin_give_case "):
+		if !rank.IsAdmin(m.Author.ID) {
+			return
+		}
+		log.Printf("Matched !admin_give_case")
+		rank.HandleAdminGiveCase(s, m, command)
+	case strings.HasPrefix(command, "!admin_give_nft "):
+		if !rank.IsAdmin(m.Author.ID) {
+			return
+		}
+		log.Printf("Matched !admin_give_nft")
+		rank.HandleAdminGiveNFT(s, m, command)
+	case strings.HasPrefix(command, "!admin_remove_nft "):
+		if !rank.IsAdmin(m.Author.ID) {
+			return
+		}
+		log.Printf("Matched !admin_remove_nft")
+		rank.HandleAdminRemoveNFT(s, m, command)
+	case strings.HasPrefix(command, "!admin_holiday_case "):
+		if !rank.IsAdmin(m.Author.ID) {
+			return
+		}
+		log.Printf("Matched !admin_holiday_case")
+		rank.HandleAdminHolidayCase(s, m, command)
+	case strings.HasPrefix(command, "!show_nft "):
+		log.Printf("Matched !show_nft")
+		rank.HandleShowNFTCommand(s, m, command)
+	case command == "!test_clear_all_nfts":
+		if !rank.IsAdmin(m.Author.ID) {
+			return
+		}
+		log.Printf("Matched !test_clear_all_nfts")
+		rank.ClearAllUserNFTs(s, m)
 	default:
 		log.Printf("No match for command: %s", command)
 	}
