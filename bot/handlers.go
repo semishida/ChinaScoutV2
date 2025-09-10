@@ -340,9 +340,9 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 		log.Printf("Matched !sync_nfts")
 		err := rank.Kki.SyncFromSheets(rank)
 		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Ошибка синхронизации: "+err.Error())
+			s.ChannelMessageSend(m.ChannelID, "❌ Ошибка синхронизации: "+err.Error())
 		} else {
-			s.ChannelMessageSend(m.ChannelID, "NFT и кейсы синхронизированы из Google Sheets!")
+			s.ChannelMessageSend(m.ChannelID, "✅ NFT и кейсы синхронизированы из Google Sheets!")
 		}
 	case command == "!inventory":
 		log.Printf("Matched !inventory")
@@ -350,9 +350,9 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!sell "):
 		log.Printf("Matched !sell")
 		rank.HandleSellCommand(s, m, command)
-	case strings.HasPrefix(command, "!transfer_nft "):
-		log.Printf("Matched !transfer_nft")
-		rank.HandleTransferNFTCommand(s, m, command)
+	case strings.HasPrefix(command, "!trade_nft "):
+		log.Printf("Matched !trade_nft")
+		rank.HandleTradeNFTCommand(s, m, command)
 	case strings.HasPrefix(command, "!open_case "):
 		log.Printf("Matched !open_case")
 		rank.HandleOpenCaseCommand(s, m, command)
@@ -389,15 +389,15 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!show_nft "):
 		log.Printf("Matched !show_nft")
 		rank.HandleShowNFTCommand(s, m, command)
+	case strings.HasPrefix(command, "!nft_show "):
+		log.Printf("Matched !nft_show")
+		rank.HandleNFTShowCommand(s, m, command)
 	case command == "!test_clear_all_nfts":
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
 		log.Printf("Matched !test_clear_all_nfts")
 		rank.ClearAllUserNFTs(s, m)
-	case strings.HasPrefix(command, "!admin"):
-		log.Printf("Matched !admin")
-		rank.HandleAdminCommand(s, m, m.Content)
 	default:
 		log.Printf("No match for command: %s", command)
 	}
