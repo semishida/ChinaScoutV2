@@ -18,6 +18,11 @@ import (
 	"github.com/joho/godotenv"
 )
 
+type CaseBank struct {
+	Cases       map[string]int // caseID -> count
+	LastUpdated time.Time
+}
+
 var RarityEmojis = map[string]string{
 	"Common":     "🟦",
 	"Rare":       "🟪",
@@ -46,6 +51,7 @@ type Ranking struct {
 	cinemaChannelID   string
 	Kki               *KKI
 	sellMessageIDs    map[string]string // userID -> messageID
+	caseBank          *CaseBank
 }
 
 // NewRanking инициализирует структуру Ranking.
@@ -69,6 +75,10 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string
 		pendingCinemaBids: make(map[string]PendingCinemaBid),
 		cinemaChannelID:   cinemaChannelID,
 		sellMessageIDs:    make(map[string]string),
+		caseBank: &CaseBank{
+			Cases:       make(map[string]int),
+			LastUpdated: time.Now(),
+		},
 	}
 
 	// Подключение к Redis с повторными попытками
@@ -108,6 +118,9 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string
 
 	// Загрузка cinema options
 	r.LoadCinemaOptions()
+
+	// Инициализация банка кейсов
+	r.initializeCaseBank()
 
 	// Инициализация KKI
 	r.Kki, err = NewKKI(r.ctx)
@@ -668,16 +681,28 @@ func (r *Ranking) rollNFT(possible []NFT) NFT {
 func (r *Ranking) HandleDailyCaseCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	key := fmt.Sprintf("daily_case:%s:%s", m.Author.ID, time.Now().Format("2006-01-02"))
 	if r.redis.Exists(r.ctx, key).Val() > 0 {
-		s.ChannelMessageSend(m.ChannelID, "Ежедневный кейс уже получен.")
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ежедневный кейс уже получен сегодня.**")
+		return
+	}
+
+	// Проверка наличия daily_case
+	if _, ok := r.Kki.cases["daily_case"]; !ok {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ежедневный кейс (ID: daily_case) не найден в базе. Проверьте Google Sheets.**")
+		log.Printf("daily_case not found in r.Kki.cases")
 		return
 	}
 
 	userCaseInv := r.Kki.GetUserCaseInventory(r, m.Author.ID)
-	userCaseInv["daily"]++
-	r.Kki.SaveUserCaseInventory(r, m.Author.ID, userCaseInv)
-	r.redis.Set(r.ctx, key, "claimed", 24*time.Hour)
+	userCaseInv["daily_case"]++ // Исправлено с "daily" на "daily_case"
+	err := r.Kki.SaveUserCaseInventory(r, m.Author.ID, userCaseInv)
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка сохранения кейса. Попробуйте снова.**")
+		log.Printf("Failed to save daily_case for user %s: %v", m.Author.ID, err)
+		return
+	}
 
-	s.ChannelMessageSend(m.ChannelID, "Вы получили ежедневный кейс! Используйте !open_case daily для открытия.")
+	r.redis.Set(r.ctx, key, "claimed", 24*time.Hour)
+	s.ChannelMessageSend(m.ChannelID, "✅ **Вы получили ежедневный кейс!** Используйте `!open_case daily_case` для открытия.")
 }
 
 // HandleBuyCaseFromCommand !buy_case_from <@user> <caseID> <count>
@@ -883,7 +908,14 @@ func (r *Ranking) ClearAllUserNFTs(s *discordgo.Session, m *discordgo.MessageCre
 	for _, key := range keys {
 		r.redis.Del(r.ctx, key)
 	}
-	s.ChannelMessageSend(m.ChannelID, "❌ **Все NFT, кейсы и лимиты пользователей очищены.**")
+	keys, _ = r.redis.Keys(r.ctx, "case_buy_limit:*").Result()
+	for _, key := range keys {
+		r.redis.Del(r.ctx, key)
+	}
+	// Сброс банка кейсов
+	r.initializeCaseBank()
+
+	s.ChannelMessageSend(m.ChannelID, "❌ **Все NFT, кейсы, лимиты и банк кейсов очищены.**")
 }
 
 // HandleCaseInventoryCommand отображает инвентарь кейсов пользователя и лимит открытия
@@ -988,16 +1020,169 @@ func (r *Ranking) HandleCaseHelpCommand(s *discordgo.Session, m *discordgo.Messa
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "📜 **Пользовательские команды**",
-				Value:  "```!case_inventory - Показать инвентарь кейсов\n!inventory - Показать инвентарь NFT\n!open_case <caseID> - Открыть кейс\n!daily_case - Получить ежедневный кейс\n!trade_nft @user <nftID> <count> - Передать NFT игроку\n!sell <nftID> <count> - Продать NFT\n!nft_show <nftID> - Показать NFT всем```",
+				Value:  "```!case_inventory - Показать инвентарь кейсов\n!inventory - Показать инвентарь NFT\n!open_case <caseID> - Открыть кейс\n!daily_case - Получить ежедневный кейс\n!trade_nft @user <nftID> <count> - Передать NFT игроку\n!sell <nftID> <count> - Продать NFT\n!case_trade @user <caseID> <count> <price> - Купить кейс у игрока\n!case_bank - Показать кейсы в банке\n!buy_case_bank <caseID> <count> - Купить кейс из банка\n!nft_show <nftID> - Показать NFT всем```",
 				Inline: false,
 			},
 			{
 				Name:   "👑 **Админские команды**",
-				Value:  "```!a_give_case @user <caseID> - Выдать кейс игроку\n!a_give_nft @user <nftID> <count> - Выдать NFT игроку\n!a_remove_nft @user <nftID> <count> - Удалить NFT у игрока\n!a_holiday_case @user <count> - Выдать праздничный кейс\n!a_give_holiday_case_all <count> - Выдать праздничный кейс всем\n!sync_nfts - Синхронизировать NFT и кейсы\n!test_clear_all_nfts - Очистить все инвентари```",
+				Value:  "```!a_give_case @user <caseID> - Выдать кейс игроку\n!a_give_nft @user <nftID> <count> - Выдать NFT игроку\n!a_remove_nft @user <nftID> <count> - Удалить NFT у игрока\n!a_holiday_case @user <count> - Выдать праздничный кейс\n!a_give_holiday_case_all <count> - Выдать праздничный кейс всем\n!sync_nfts - Синхронизировать NFT и кейсы\n!test_clear_all_nfts - Очистить все инвентари и банк```",
 				Inline: false,
 			},
 		},
 		Footer: &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Вызвал: %s | Славь Императора! 👑", m.Author.Username)},
 	}
 	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+}
+
+// initializeCaseBank инициализирует банк кейсов
+func (r *Ranking) initializeCaseBank() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.caseBank.Cases = map[string]int{
+		"daily_case":   70,
+		"holiday_case": 70,
+		// Добавьте другие кейсы, если нужно
+	}
+	r.caseBank.LastUpdated = time.Now()
+
+	jsonData, _ := json.Marshal(r.caseBank)
+	r.redis.Set(r.ctx, "case_bank", jsonData, 0)
+}
+
+// refreshCaseBank обновляет банк кейсов, если прошло 12 часов
+func (r *Ranking) refreshCaseBank() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	jsonData, err := r.redis.Get(r.ctx, "case_bank").Bytes()
+	if err == redis.Nil {
+		r.initializeCaseBank()
+		return
+	}
+	var bank CaseBank
+	if err := json.Unmarshal(jsonData, &bank); err != nil {
+		log.Printf("Failed to unmarshal case_bank: %v", err)
+		r.initializeCaseBank()
+		return
+	}
+	r.caseBank = &bank
+
+	if time.Since(r.caseBank.LastUpdated) >= 12*time.Hour {
+		r.caseBank.Cases = map[string]int{
+			"daily_case":   70,
+			"holiday_case": 70,
+		}
+		r.caseBank.LastUpdated = time.Now()
+		jsonData, _ := json.Marshal(r.caseBank)
+		r.redis.Set(r.ctx, "case_bank", jsonData, 0)
+		log.Printf("Case bank refreshed at %s", time.Now())
+	}
+}
+
+// HandleCaseBankCommand !case_bank
+func (r *Ranking) HandleCaseBankCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	r.refreshCaseBank()
+
+	var lines []string
+	for caseID, count := range r.caseBank.Cases {
+		kase, ok := r.Kki.cases[caseID]
+		if !ok {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("📦 **%s** (x%d)\n📌 ID: %s\n💰 Цена: %d", kase.Name, count, caseID, kase.Price))
+	}
+	if len(lines) == 0 {
+		s.ChannelMessageSend(m.ChannelID, "🏦 **Банк кейсов пуст** ══════\nИмператор ждёт новых поставок! 😢")
+		return
+	}
+
+	nextUpdate := r.caseBank.LastUpdated.Add(12 * time.Hour)
+	timeLeft := time.Until(nextUpdate).Round(time.Second)
+	hours := int(timeLeft.Hours())
+	minutes := int(timeLeft.Minutes()) % 60
+	timeLeftStr := fmt.Sprintf("%dч %dм", hours, minutes)
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "🏦 **Банк кейсов** ══════",
+		Description: fmt.Sprintf("Доступные кейсы для покупки:\n\n%s\n\n🕒 **До обновления магазина**: %s", strings.Join(lines, "\n\n"), timeLeftStr),
+		Color:       0x00BFFF,
+		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Вызвал: %s | Славь Императора! 👑", m.Author.Username)},
+	}
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+}
+
+// HandleBuyCaseBankCommand !buy_case_bank <caseID> <count>
+func (r *Ranking) HandleBuyCaseBankCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
+	parts := strings.Fields(command)
+	if len(parts) != 3 {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Использование**: !buy_case_bank <caseID> <count>")
+		return
+	}
+	caseID, countStr := parts[1], parts[2]
+	count, err := strconv.Atoi(countStr)
+	if err != nil || count <= 0 {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Некорректное количество.**")
+		return
+	}
+
+	// Проверка кейса
+	kase, ok := r.Kki.cases[caseID]
+	if !ok {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ **Кейс с ID %s не найден.**", caseID))
+		return
+	}
+
+	// Проверка банка
+	r.refreshCaseBank()
+	if r.caseBank.Cases[caseID] < count {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ **В банке недостаточно кейсов (%s). Остаток: %d.**", kase.Name, r.caseBank.Cases[caseID]))
+		return
+	}
+
+	// Проверка лимита покупок
+	key := fmt.Sprintf("case_buy_limit:%s:%s", m.Author.ID, time.Now().Format("2006-01-02"))
+	bought, _ := r.redis.Get(r.ctx, key).Int()
+	if bought+count > 5 {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ **Достигнут дневной лимит покупок (5 кейсов). Куплено сегодня: %d.**", bought))
+		return
+	}
+
+	// Проверка кредитов
+	price := kase.Price * count
+	buyerCoins := r.GetRating(m.Author.ID)
+	if buyerCoins < price {
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ **Недостаточно кредитов. Нужно: %d, у вас: %d.**", price, buyerCoins))
+		return
+	}
+
+	// Обновление банка
+	r.mu.Lock()
+	r.caseBank.Cases[caseID] -= count
+	if r.caseBank.Cases[caseID] == 0 {
+		delete(r.caseBank.Cases, caseID)
+	}
+	jsonData, _ := json.Marshal(r.caseBank)
+	r.redis.Set(r.ctx, "case_bank", jsonData, 0)
+	r.mu.Unlock()
+
+	// Обновление инвентаря
+	buyerInv := r.Kki.GetUserCaseInventory(r, m.Author.ID)
+	buyerInv[caseID] += count
+	err = r.Kki.SaveUserCaseInventory(r, m.Author.ID, buyerInv)
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка сохранения инвентаря. Попробуйте снова.**")
+		log.Printf("Failed to save case inventory for user %s: %v", m.Author.ID, err)
+		return
+	}
+
+	// Обновление кредитов
+	r.UpdateRating(m.Author.ID, -price)
+	r.redis.IncrBy(r.ctx, key, int64(count))
+	r.redis.Expire(r.ctx, key, 24*time.Hour)
+
+	// Лог операции
+	r.LogCreditOperation(s, fmt.Sprintf("🛒 **%s** купил %d x 📦 **%s** (ID: %s) из банка за 💰 %d кредитов.", m.Author.Username, count, kase.Name, caseID, price))
+
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ **Куплено** %d x 📦 **%s** (ID: %s) за 💰 %d кредитов!", count, kase.Name, caseID, price))
 }

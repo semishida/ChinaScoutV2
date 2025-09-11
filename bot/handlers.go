@@ -416,6 +416,12 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 		}
 		log.Printf("Matched !test_clear_all_nfts")
 		rank.ClearAllUserNFTs(s, m)
+	case command == "!case_bank":
+		log.Printf("Matched !case_bank")
+		rank.HandleCaseBankCommand(s, m)
+	case strings.HasPrefix(command, "!buy_case_bank "):
+		log.Printf("Matched !buy_case_bank")
+		rank.HandleBuyCaseBankCommand(s, m, command)
 	default:
 		log.Printf("No match for command: %s", command)
 	}
