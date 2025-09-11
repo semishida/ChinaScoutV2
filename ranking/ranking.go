@@ -1186,3 +1186,22 @@ func (r *Ranking) HandleBuyCaseBankCommand(s *discordgo.Session, m *discordgo.Me
 
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ **Куплено** %d x 📦 **%s** (ID: %s) за 💰 %d кредитов!", count, kase.Name, caseID, price))
 }
+
+// HandleResetCaseLimitsCommand !a_reset_case_limits
+func (r *Ranking) HandleResetCaseLimitsCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if !r.IsAdmin(m.Author.ID) {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Только админы могут использовать эту команду!**")
+		return
+	}
+	keys, err := r.redis.Keys(r.ctx, "case_limit:*").Result()
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка получения ключей из Redis.**")
+		log.Printf("Failed to get case_limit keys: %v", err)
+		return
+	}
+	for _, key := range keys {
+		r.redis.Del(r.ctx, key)
+		log.Printf("Deleted case limit key: %s", key)
+	}
+	s.ChannelMessageSend(m.ChannelID, "✅ **Лимиты на открытие кейсов сброшены для всех пользователей!**")
+}

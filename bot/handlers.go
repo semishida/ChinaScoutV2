@@ -422,6 +422,12 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "!buy_case_bank "):
 		log.Printf("Matched !buy_case_bank")
 		rank.HandleBuyCaseBankCommand(s, m, command)
+	case command == "!a_reset_case_limits":
+		if !rank.IsAdmin(m.Author.ID) {
+			return
+		}
+		log.Printf("Matched !a_reset_case_limits")
+		rank.HandleResetCaseLimitsCommand(s, m)
 	default:
 		log.Printf("No match for command: %s", command)
 	}
