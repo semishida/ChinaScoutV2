@@ -979,7 +979,7 @@ func (r *Ranking) HandleAdminGiveHolidayCaseAll(s *discordgo.Session, m *discord
 
 	// Проверка наличия holiday_case
 	if _, ok := r.Kki.cases["holiday_case"]; !ok {
-		s.ChannelMessageSend(m.ChannelID, "❌ **Праздничный кейс (ID: holiday_case) не найден в базе.**")
+		s.ChannelMessageSend(m.ChannelID, "❌ **Праздничный кейс (ID: holiday_case) не найден в базе. Проверьте Google Sheets.**")
 		log.Printf("holiday_case not found in r.Kki.cases")
 		return
 	}
@@ -987,14 +987,21 @@ func (r *Ranking) HandleAdminGiveHolidayCaseAll(s *discordgo.Session, m *discord
 	// Получение всех участников гильдии
 	guild, err := s.Guild(m.GuildID)
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка получения списка участников.**")
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка получения списка участников. Проверьте права бота (View Guild Members).**")
 		log.Printf("Failed to fetch guild members: %v", err)
+		return
+	}
+
+	if len(guild.Members) == 0 {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Гильдия пуста или бот не может получить участников. Проверьте права.**")
+		log.Printf("No members found in guild %s", m.GuildID)
 		return
 	}
 
 	successCount := 0
 	for _, member := range guild.Members {
 		if member.User.Bot {
+			log.Printf("Skipping bot user %s", member.User.ID)
 			continue
 		}
 		inv := r.Kki.GetUserCaseInventory(r, member.User.ID)
@@ -1006,6 +1013,12 @@ func (r *Ranking) HandleAdminGiveHolidayCaseAll(s *discordgo.Session, m *discord
 		}
 		successCount++
 		log.Printf("Added %d holiday_case to user %s", count, member.User.ID)
+	}
+
+	if successCount == 0 {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Не удалось выдать кейсы ни одному участнику. Проверьте логи и права бота.**")
+		log.Printf("No holiday cases distributed in guild %s", m.GuildID)
+		return
 	}
 
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ **Выдано** %d x 📦 **Праздничный кейс** (ID для открытия/передачи: holiday_case) %d участникам сервера!", count, successCount))
