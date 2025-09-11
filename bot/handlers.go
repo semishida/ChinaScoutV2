@@ -16,7 +16,10 @@ import (
 // Start sets up the Discord and Telegram bots and starts the relay system.
 func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayChannelID string, rank *ranking.Ranking) {
 	dg := SetupDiscord(discordToken, floodChannelID, relayChannelID, rank)
-	defer dg.Close()
+	defer func() {
+		rank.Stop() // Останавливаем горутину сброса
+		dg.Close()
+	}()
 
 	tgBot, chatID := setupTelegram(telegramToken, telegramChatID)
 

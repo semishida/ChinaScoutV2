@@ -52,6 +52,7 @@ type Ranking struct {
 	Kki               *KKI
 	sellMessageIDs    map[string]string // userID -> messageID
 	caseBank          *CaseBank
+	stopResetChan     chan struct{}
 }
 
 // NewRanking инициализирует структуру Ranking.
@@ -116,6 +117,8 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string
 		r.admins[id] = true
 	}
 
+	r.stopResetChan = make(chan struct{})
+	go r.startDailyReset()
 	// Загрузка cinema options
 	r.LoadCinemaOptions()
 
@@ -1033,12 +1036,12 @@ func (r *Ranking) HandleCaseHelpCommand(s *discordgo.Session, m *discordgo.Messa
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "📜 **Пользовательские команды**",
-				Value:  "```!case_inventory - Показать инвентарь кейсов\n!inventory - Показать инвентарь NFT\n!open_case <caseID> - Открыть кейс\n!daily_case - Получить ежедневный кейс\n!trade_nft @user <nftID> <count> - Передать NFT игроку\n!sell <nftID> <count> - Продать NFT\n!case_trade @user <caseID> <count> <price> - Купить кейс у игрока\n!case_bank - Показать кейсы в банке\n!buy_case_bank <caseID> <count> - Купить кейс из банка\n!nft_show <nftID> - Показать NFT всем```",
+				Value:  "```!case_inventory - Показать инвентарь кейсов\n!inventory - Показать инвентарь NFT\n!open_case <caseID> - Открыть кейс\n!daily_case - Получить ежедневный кейс\n!trade_nft @user <nftID> <count> - Передать NFT игроку\n!sell <nftID> <count> - Продать NFT\n!case_trade @user <caseID> <count> - Купить кейс у игрока\n!case_bank - Показать кейсы в банке\n!buy_case_bank <caseID> <count> - Купить кейс из банка\n!nft_show <nftID> - Показать NFT всем```",
 				Inline: false,
 			},
 			{
 				Name:   "👑 **Админские команды**",
-				Value:  "```!a_give_case @user <caseID> - Выдать кейс игроку\n!a_give_nft @user <nftID> <count> - Выдать NFT игроку\n!a_remove_nft @user <nftID> <count> - Удалить NFT у игрока\n!a_holiday_case @user <count> - Выдать праздничный кейс\n!a_give_holiday_case_all <count> - Выдать праздничный кейс всем\n!sync_nfts - Синхронизировать NFT и кейсы\n!test_clear_all_nfts - Очистить все инвентари и банк\n!a_reset_case_limits - Сбросить ВСЕМ лимит на открытие```",
+				Value:  "```!a_give_case @user <caseID> - Выдать кейс игроку\n!a_give_nft @user <nftID> <count> - Выдать NFT игроку\n!a_remove_nft @user <nftID> <count> - Удалить NFT у игрока\n!a_holiday_case @user <count> - Выдать праздничный кейс\n!a_give_holiday_case_all <count> - Выдать праздничный кейс всем\n!sync_nfts - Синхронизировать NFT и кейсы\n!test_clear_all_nfts - Очистить все инвентари и банк\n!a_reset_case_limits - Сбросить ВСЕМ лимиты на открытие, покупку и ежедневный кейс```",
 				Inline: false,
 			},
 		},
@@ -1206,9 +1209,10 @@ func (r *Ranking) HandleResetCaseLimitsCommand(s *discordgo.Session, m *discordg
 		s.ChannelMessageSend(m.ChannelID, "❌ **Только админы могут использовать эту команду!**")
 		return
 	}
+	// Сброс лимитов на открытие кейсов
 	keys, err := r.redis.Keys(r.ctx, "case_limit:*").Result()
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка получения ключей из Redis.**")
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка получения ключей case_limit из Redis.**")
 		log.Printf("Failed to get case_limit keys: %v", err)
 		return
 	}
@@ -1216,5 +1220,105 @@ func (r *Ranking) HandleResetCaseLimitsCommand(s *discordgo.Session, m *discordg
 		r.redis.Del(r.ctx, key)
 		log.Printf("Deleted case limit key: %s", key)
 	}
-	s.ChannelMessageSend(m.ChannelID, "✅ **Лимиты на открытие кейсов сброшены для всех пользователей!**")
+
+	// Сброс лимитов на покупку кейсов
+	keys, err = r.redis.Keys(r.ctx, "case_buy_limit:*").Result()
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка получения ключей case_buy_limit из Redis.**")
+		log.Printf("Failed to get case_buy_limit keys: %v", err)
+		return
+	}
+	for _, key := range keys {
+		r.redis.Del(r.ctx, key)
+		log.Printf("Deleted case buy limit key: %s", key)
+	}
+
+	// Сброс лимитов на ежедневный кейс
+	keys, err = r.redis.Keys(r.ctx, "daily_case:*").Result()
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка получения ключей daily_case из Redis.**")
+		log.Printf("Failed to get daily_case keys: %v", err)
+		return
+	}
+	for _, key := range keys {
+		r.redis.Del(r.ctx, key)
+		log.Printf("Deleted daily case key: %s", key)
+	}
+
+	s.ChannelMessageSend(m.ChannelID, "✅ **Все лимиты (открытие, покупка, ежедневный кейс) сброшены для всех пользователей!**")
+}
+
+// startDailyReset запускает горутину для сброса лимитов в 4:00 по Красноярску
+func (r *Ranking) startDailyReset() {
+	// Загружаем часовой пояс Красноярска
+	loc, err := time.LoadLocation("Asia/Krasnoyarsk")
+	if err != nil {
+		log.Printf("Ошибка загрузки часового пояса Asia/Krasnoyarsk: %v", err)
+		return
+	}
+
+	for {
+		// Вычисляем время до следующего сброса (4:00 следующего дня)
+		now := time.Now().In(loc)
+		nextReset := time.Date(now.Year(), now.Month(), now.Day(), 4, 0, 0, 0, loc)
+		if now.After(nextReset) || now.Equal(nextReset) {
+			nextReset = nextReset.Add(24 * time.Hour)
+		}
+		timeUntilReset := nextReset.Sub(now)
+
+		// Ожидаем до следующего сброса или сигнала остановки
+		select {
+		case <-time.After(timeUntilReset):
+			// Выполняем сброс всех лимитов
+			r.resetAllLimits()
+			log.Printf("Автоматический сброс лимитов выполнен в %s", time.Now().In(loc).Format(time.RFC3339))
+		case <-r.stopResetChan:
+			log.Printf("Горутина сброса лимитов остановлена")
+			return
+		}
+	}
+}
+
+// resetAllLimits сбрасывает все лимиты (открытие, покупка, ежедневный кейс)
+func (r *Ranking) resetAllLimits() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Сброс лимитов на открытие кейсов
+	keys, err := r.redis.Keys(r.ctx, "case_limit:*").Result()
+	if err != nil {
+		log.Printf("Ошибка получения ключей case_limit: %v", err)
+		return
+	}
+	for _, key := range keys {
+		r.redis.Del(r.ctx, key)
+		log.Printf("Автоматически удален ключ case_limit: %s", key)
+	}
+
+	// Сброс лимитов на покупку кейсов
+	keys, err = r.redis.Keys(r.ctx, "case_buy_limit:*").Result()
+	if err != nil {
+		log.Printf("Ошибка получения ключей case_buy_limit: %v", err)
+		return
+	}
+	for _, key := range keys {
+		r.redis.Del(r.ctx, key)
+		log.Printf("Автоматически удален ключ case_buy_limit: %s", key)
+	}
+
+	// Сброс лимитов на ежедневный кейс
+	keys, err = r.redis.Keys(r.ctx, "daily_case:*").Result()
+	if err != nil {
+		log.Printf("Ошибка получения ключей daily_case: %v", err)
+		return
+	}
+	for _, key := range keys {
+		r.redis.Del(r.ctx, key)
+		log.Printf("Автоматически удален ключ daily_case: %s", key)
+	}
+}
+
+// Stop прекращает работу горутины сброса лимитов
+func (r *Ranking) Stop() {
+	close(r.stopResetChan)
 }
