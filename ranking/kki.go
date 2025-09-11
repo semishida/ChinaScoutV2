@@ -60,10 +60,10 @@ var RarityColors = map[string]int{
 var RarityProbabilities = []RarityProb{
 	{"Common", 0.5},
 	{"Rare", 0.25},
-	{"Super-rare", 0.12},
-	{"Epic", 0.07},
-	{"Nephrite", 0.04},
-	{"Exotic", 0.015},
+	{"Super-rare", 0.10},
+	{"Epic", 0.05},
+	{"Nephrite", 0.03},
+	{"Exotic", 0.010},
 	{"LEGENDARY", 0.005},
 }
 
