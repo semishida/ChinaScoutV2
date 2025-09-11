@@ -87,6 +87,12 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 			customID := i.MessageComponentData().CustomID
 			log.Printf("Interaction received, CustomID: %s, ChannelID: %s, UserID: %s", customID, i.ChannelID, i.Member.User.ID)
 			switch {
+			case strings.HasPrefix(customID, "sell_confirm_"):
+				log.Printf("Matched sell_confirm_")
+				rank.HandleSellConfirm(s, i)
+			case strings.HasPrefix(customID, "sell_cancel_"):
+				log.Printf("Matched sell_cancel_")
+				rank.HandleSellCancel(s, i)
 			case strings.HasPrefix(customID, "user_confirm_") || strings.HasPrefix(customID, "user_decline_") ||
 				strings.HasPrefix(customID, "admin_accept_") || strings.HasPrefix(customID, "admin_reject_"):
 				log.Printf("Matched cinema button: %s", customID)
@@ -394,7 +400,7 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 		rank.HandleShowNFTCommand(s, m, command)
 	case strings.HasPrefix(command, "!nft_show "):
 		log.Printf("Matched !nft_show")
-		rank.HandleNFTShowCommand(s, m, command)
+		rank.HandleShowNFTCommand(s, m, command)
 	case command == "!test_clear_all_nfts":
 		if !rank.IsAdmin(m.Author.ID) {
 			return
