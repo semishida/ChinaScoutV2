@@ -63,7 +63,7 @@ var RarityProbabilities = []RarityProb{
 	{"Super-rare", 0.10},
 	{"Epic", 0.05},
 	{"Nephrite", 0.03},
-	{"Exotic", 0.010},
+	{"Exotic", 0.01},
 	{"LEGENDARY", 0.005},
 }
 
