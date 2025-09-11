@@ -18,6 +18,16 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var RarityEmojis = map[string]string{
+	"Common":     "🟦",
+	"Rare":       "🟪",
+	"Super-rare": "🟧",
+	"Epic":       "🟨",
+	"Nephrite":   "🟥",
+	"Exotic":     "🟩",
+	"LEGENDARY":  "⭐",
+}
+
 // Ranking управляет рейтингами, опросами, играми и голосовой активностью.
 type Ranking struct {
 	mu                sync.Mutex
@@ -35,6 +45,7 @@ type Ranking struct {
 	pendingCinemaBids map[string]PendingCinemaBid
 	cinemaChannelID   string
 	Kki               *KKI
+	sellMessageIDs    map[string]string // userID -> messageID
 }
 
 // NewRanking инициализирует структуру Ranking.
@@ -57,6 +68,7 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string
 		cinemaOptions:     []CinemaOption{},
 		pendingCinemaBids: make(map[string]PendingCinemaBid),
 		cinemaChannelID:   cinemaChannelID,
+		sellMessageIDs:    make(map[string]string),
 	}
 
 	// Подключение к Redis с повторными попытками
@@ -171,7 +183,7 @@ func (r *Ranking) SaveUserInventory(userID string, inv UserInventory) {
 func (r *Ranking) HandleInventoryCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	inv := r.GetUserInventory(m.Author.ID)
 	if len(inv) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "🎒 **Ваш инвентарь пуст.**")
+		s.ChannelMessageSend(m.ChannelID, "🎒 **Ваш инвентарь пуст** ══════\nНичего нет, Император ждёт добычи! 😢")
 		return
 	}
 
@@ -181,14 +193,15 @@ func (r *Ranking) HandleInventoryCommand(s *discordgo.Session, m *discordgo.Mess
 		if !ok {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("🃏 **%s** (ID для передачи и продажи: %s, %s, x%d) - 💰 %d", nft.Name, nftID, nft.Rarity, count, nft.Price))
+		rarityEmoji := RarityEmojis[nft.Rarity]
+		lines = append(lines, fmt.Sprintf("%s **%s** (x%d)\n📌 ID для передачи и продажи: %s\n💰 Цена: %d | %s", rarityEmoji, nft.Name, count, nftID, nft.Price, nft.Rarity))
 	}
 	sort.Strings(lines)
 	embed := &discordgo.MessageEmbed{
-		Title:       "🎒 **Ваш инвентарь**",
-		Description: strings.Join(lines, "\n"),
+		Title:       "🎒 **Инвентарь** ══════",
+		Description: strings.Join(lines, "\n\n"),
 		Color:       0x00FF00,
-		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s", m.Author.Username)},
+		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username)},
 	}
 	s.ChannelMessageSendEmbed(m.ChannelID, embed)
 }
@@ -228,10 +241,10 @@ func (r *Ranking) HandleSellCommand(s *discordgo.Session, m *discordgo.MessageCr
 	customID := fmt.Sprintf("sell_confirm_%s_%s_%d_%d", m.Author.ID, nftID, count, sellPrice)
 	cancelID := fmt.Sprintf("sell_cancel_%s", m.Author.ID)
 	embed := &discordgo.MessageEmbed{
-		Title:       "🃏 **Подтверждение продажи**",
-		Description: fmt.Sprintf("Вы хотите продать %d x **%s** (ID для передачи и продажи: %s) за 💰 %d кредитов?", count, nft.Name, nftID, sellPrice),
+		Title:       "🃏 **Подтверждение продажи** ══════",
+		Description: fmt.Sprintf("Вы хотите продать %d x %s **%s** (ID для передачи и продажи: %s) за 💰 %d кредитов?", count, RarityEmojis[nft.Rarity], nft.Name, nftID, sellPrice),
 		Color:       RarityColors[nft.Rarity],
-		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s", m.Author.Username)},
+		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username)},
 	}
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
@@ -249,10 +262,17 @@ func (r *Ranking) HandleSellCommand(s *discordgo.Session, m *discordgo.MessageCr
 			},
 		},
 	}
-	s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
 		Embed:      embed,
 		Components: components,
 	})
+	if err != nil {
+		log.Printf("Failed to send sell confirmation: %v", err)
+		return
+	}
+	r.mu.Lock()
+	r.sellMessageIDs[m.Author.ID] = msg.ID
+	r.mu.Unlock()
 }
 
 // HandleSellConfirm обрабатывает подтверждение продажи
@@ -266,6 +286,13 @@ func (r *Ranking) HandleSellConfirm(s *discordgo.Session, i *discordgo.Interacti
 		return
 	}
 	userID, nftID, countStr, sellPriceStr := parts[2], parts[3], parts[4], parts[5]
+	if userID != i.Member.User.ID {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: "❌ **Кнопка не для вас! Император гневен! 👑**"},
+		})
+		return
+	}
 	count, err := strconv.Atoi(countStr)
 	if err != nil {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -300,28 +327,74 @@ func (r *Ranking) HandleSellConfirm(s *discordgo.Session, i *discordgo.Interacti
 	r.SaveUserInventory(userID, inv)
 
 	// Начисление кредитов
-	currentCoins, _ := r.redis.Get(r.ctx, "coins:"+userID).Int()
-	r.redis.Set(r.ctx, "coins:"+userID, currentCoins+sellPrice, 0)
+	r.UpdateRating(userID, sellPrice)
 
 	// Отправка лога
 	nft := r.Kki.nfts[nftID]
-	r.LogCreditOperation(s, fmt.Sprintf("🃏 **%s** продал %d x **%s** (ID: %s) за 💰 %d кредитов.", i.Member.User.Username, count, nft.Name, nftID, sellPrice))
+	r.LogCreditOperation(s, fmt.Sprintf("🃏 **%s** продал %d x %s **%s** (ID: %s) за 💰 %d кредитов.", i.Member.User.Username, count, RarityEmojis[nft.Rarity], nft.Name, nftID, sellPrice))
 
-	// Ответ пользователю
+	// Обновление сообщения для удаления кнопок
+	embed := &discordgo.MessageEmbed{
+		Title:       "🃏 **Продажа завершена** ══════",
+		Description: fmt.Sprintf("✅ **Продано** %d x %s **%s** (ID: %s) за 💰 %d кредитов!", count, RarityEmojis[nft.Rarity], nft.Name, nftID, sellPrice),
+		Color:       RarityColors[nft.Rarity],
+		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", i.Member.User.Username)},
+	}
+	emptyComponents := []discordgo.MessageComponent{}
+	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    i.ChannelID,
+		ID:         i.Message.ID,
+		Embed:      embed,
+		Components: &emptyComponents,
+	})
+	if err != nil {
+		log.Printf("Failed to update sell message: %v", err)
+	}
+
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Content: fmt.Sprintf("✅ **Продано** %d x 🃏 **%s** (ID: %s) за 💰 %d кредитов!", count, nft.Name, nftID, sellPrice),
+			Content: fmt.Sprintf("✅ **Продано** %d x %s **%s** (ID: %s) за 💰 %d кредитов!", count, RarityEmojis[nft.Rarity], nft.Name, nftID, sellPrice),
 		},
 	})
+
+	r.mu.Lock()
+	delete(r.sellMessageIDs, userID)
+	r.mu.Unlock()
 }
 
 // HandleSellCancel обрабатывает отмену продажи
 func (r *Ranking) HandleSellCancel(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if strings.Split(i.MessageComponentData().CustomID, "_")[2] != i.Member.User.ID {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: "❌ **Кнопка не для вас! Император гневен! 👑**"},
+		})
+		return
+	}
+	embed := &discordgo.MessageEmbed{
+		Title:       "🃏 **Продажа отменена** ══════",
+		Description: "❌ Продажа отменена. Император разочарован! 😢",
+		Color:       0xFF0000,
+		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", i.Member.User.Username)},
+	}
+	emptyComponents := []discordgo.MessageComponent{}
+	_, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    i.ChannelID,
+		ID:         i.Message.ID,
+		Embed:      embed,
+		Components: &emptyComponents,
+	})
+	if err != nil {
+		log.Printf("Failed to update sell cancel message: %v", err)
+	}
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{Content: "❌ **Продажа отменена.**"},
 	})
+	r.mu.Lock()
+	delete(r.sellMessageIDs, i.Member.User.ID)
+	r.mu.Unlock()
 }
 
 // HandleTradeNFTCommand !trade_nft <@user> <nftID> <count>
@@ -399,6 +472,10 @@ func (r *Ranking) HandleCaseTradeCommand(s *discordgo.Session, m *discordgo.Mess
 		return
 	}
 
+	// Поддержка daily_case
+	if caseID == "daily" {
+		caseID = "daily_case"
+	}
 	kase, ok := r.Kki.cases[caseID]
 	if !ok {
 		s.ChannelMessageSend(m.ChannelID, "❌ **Некорректный кейс. Проверьте ID.**")
@@ -412,16 +489,15 @@ func (r *Ranking) HandleCaseTradeCommand(s *discordgo.Session, m *discordgo.Mess
 	}
 
 	price := kase.Price * count
-	buyerCoins, _ := r.redis.Get(r.ctx, "coins:"+m.Author.ID).Int()
+	buyerCoins := r.GetRating(m.Author.ID)
 	if buyerCoins < price {
 		s.ChannelMessageSend(m.ChannelID, "❌ **Недостаточно кредитов.**")
 		return
 	}
 
 	// Обновление кредитов
-	r.redis.Set(r.ctx, "coins:"+m.Author.ID, buyerCoins-price, 0)
-	sellerCoins, _ := r.redis.Get(r.ctx, "coins:"+sellerID).Int()
-	r.redis.Set(r.ctx, "coins:"+sellerID, sellerCoins+price, 0)
+	r.UpdateRating(m.Author.ID, -price)
+	r.UpdateRating(sellerID, price)
 
 	// Обновление инвентаря
 	buyerInv := r.Kki.GetUserCaseInventory(r, m.Author.ID)
@@ -448,6 +524,9 @@ func (r *Ranking) HandleOpenCaseCommand(s *discordgo.Session, m *discordgo.Messa
 		return
 	}
 	caseID := parts[1]
+	if caseID == "daily" {
+		caseID = "daily_case"
+	}
 	kase, ok := r.Kki.cases[caseID]
 	if !ok {
 		s.ChannelMessageSend(m.ChannelID, "❌ **Некорректный кейс. Проверьте ID.**")
@@ -482,7 +561,7 @@ func (r *Ranking) HandleOpenCaseCommand(s *discordgo.Session, m *discordgo.Messa
 	var possibleNFTs []NFT
 	for _, nft := range r.Kki.nfts {
 		for _, col := range collections {
-			if nft.Collection == col && (caseID != "daily" || nft.Collection != "holiday") {
+			if nft.Collection == col && (caseID != "daily_case" || nft.Collection != "holiday") {
 				possibleNFTs = append(possibleNFTs, nft)
 				break
 			}
@@ -523,11 +602,11 @@ func (r *Ranking) HandleOpenCaseCommand(s *discordgo.Session, m *discordgo.Messa
 				newTag = "\n**Новая в коллекции!** 🎉"
 			}
 			embed := &discordgo.MessageEmbed{
-				Title:       fmt.Sprintf("🎉 **Выпало**: %s (ID для передачи и продажи: %s)", nft.Name, nft.ID),
-				Description: fmt.Sprintf("**Редкость**: %s\n**Описание**: %s\n**Дата выпуска**: %s\n**Цена**: 💰 %d\n**Коллекция**: %s%s", nft.Rarity, nft.Description, nft.ReleaseDate, nft.Price, nft.Collection, newTag),
+				Title:       fmt.Sprintf("🎉 **Выпало**: %s **%s**", RarityEmojis[nft.Rarity], nft.Name),
+				Description: fmt.Sprintf("**ID для передачи и продажи**: %s\n**Редкость**: %s\n**Описание**: %s\n**Дата выпуска**: %s\n**Цена**: 💰 %d\n**Коллекция**: %s%s", nft.ID, nft.Rarity, nft.Description, nft.ReleaseDate, nft.Price, nft.Collection, newTag),
 				Color:       RarityColors[nft.Rarity],
 				Image:       &discordgo.MessageEmbedImage{URL: nft.ImageURL},
-				Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s", m.Author.Username)},
+				Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username)},
 			}
 			msg, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
 			if err == nil {
@@ -540,11 +619,11 @@ func (r *Ranking) HandleOpenCaseCommand(s *discordgo.Session, m *discordgo.Messa
 			} else {
 				log.Printf("Failed to send embed for NFT %s: %v", nft.ID, err)
 			}
-			lines = append(lines, fmt.Sprintf("%s (ID: %s)", nft.Name, nft.ID))
+			lines = append(lines, fmt.Sprintf("%s **%s** (ID: %s)", RarityEmojis[nft.Rarity], nft.Name, nft.ID))
 			time.Sleep(1 * time.Second)
 		}
 		r.SaveUserInventory(m.Author.ID, inv)
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("🎉 **Вы получили**: %s", strings.Join(lines, ", ")))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("🎉 **Вы получили** ══════\n%s", strings.Join(lines, "\n")))
 	}()
 }
 
@@ -769,11 +848,11 @@ func (r *Ranking) HandleShowNFTCommand(s *discordgo.Session, m *discordgo.Messag
 	}
 
 	embed := &discordgo.MessageEmbed{
-		Title:       fmt.Sprintf("🃏 **%s** (ID для передачи и продажи: %s)", nft.Name, nftID),
-		Description: fmt.Sprintf("**Описание**: %s\n**Редкость**: %s\n**Дата выпуска**: %s\n**Цена**: 💰 %d\n**Коллекция**: %s", nft.Description, nft.Rarity, nft.ReleaseDate, nft.Price, nft.Collection),
+		Title:       fmt.Sprintf("🃏 %s **%s**", RarityEmojis[nft.Rarity], nft.Name),
+		Description: fmt.Sprintf("**ID для передачи и продажи**: %s\n**Описание**: %s\n**Редкость**: %s\n**Дата выпуска**: %s\n**Цена**: 💰 %d\n**Коллекция**: %s", nftID, nft.Description, nft.Rarity, nft.ReleaseDate, nft.Price, nft.Collection),
 		Color:       RarityColors[nft.Rarity],
 		Image:       &discordgo.MessageEmbedImage{URL: nft.ImageURL},
-		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Похвастался: %s", m.Author.Username)},
+		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Похвастался: %s | Славь Императора! 👑", m.Author.Username)},
 	}
 	s.ChannelMessageSendEmbed(m.ChannelID, embed)
 }
@@ -796,13 +875,13 @@ func (r *Ranking) ClearAllUserNFTs(s *discordgo.Session, m *discordgo.MessageCre
 	for _, key := range keys {
 		r.redis.Del(r.ctx, key)
 	}
-	s.ChannelMessageSend(m.ChannelID, "Все NFT, кейсы и лимиты пользователей очищены.")
+	s.ChannelMessageSend(m.ChannelID, "❌ **Все NFT, кейсы и лимиты пользователей очищены.**")
 }
 
 func (r *Ranking) HandleCaseInventoryCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	inv := r.Kki.GetUserCaseInventory(r, m.Author.ID)
 	if len(inv) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "📦 **Ваш инвентарь кейсов пуст.**")
+		s.ChannelMessageSend(m.ChannelID, "📦 **Инвентарь кейсов пуст** ══════\nИмператор ждёт, открывай кейсы! 😤")
 		return
 	}
 
@@ -812,7 +891,7 @@ func (r *Ranking) HandleCaseInventoryCommand(s *discordgo.Session, m *discordgo.
 		if !ok {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("📦 **%s** (ID для открытия/передачи: %s, x%d) - 💰 %d", kase.Name, caseID, count, kase.Price))
+		lines = append(lines, fmt.Sprintf("📦 **%s** (x%d)\n📌 ID для открытия/передачи: %s\n💰 Цена: %d", kase.Name, count, caseID, kase.Price))
 	}
 	sort.Strings(lines)
 
@@ -822,10 +901,70 @@ func (r *Ranking) HandleCaseInventoryCommand(s *discordgo.Session, m *discordgo.
 	limitMsg := fmt.Sprintf("🔄 **Лимит открытия кейсов сегодня**: %d/5", opened)
 
 	embed := &discordgo.MessageEmbed{
-		Title:       "📦 **Ваш инвентарь кейсов**",
-		Description: strings.Join(lines, "\n") + "\n\n" + limitMsg,
+		Title:       "📦 **Инвентарь кейсов** ══════",
+		Description: strings.Join(lines, "\n\n") + "\n" + limitMsg,
 		Color:       0x00BFFF,
-		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s", m.Author.Username)},
+		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username)},
+	}
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+}
+
+// HandleAdminGiveHolidayCaseAll !a_give_holiday_case_all <count>
+func (r *Ranking) HandleAdminGiveHolidayCaseAll(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
+	if !r.IsAdmin(m.Author.ID) {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Только админы могут использовать эту команду!**")
+		return
+	}
+	parts := strings.Fields(command)
+	if len(parts) != 2 {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Использование**: !a_give_holiday_case_all <count>")
+		return
+	}
+	count, err := strconv.Atoi(parts[1])
+	if err != nil || count <= 0 {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Некорректное количество.**")
+		return
+	}
+
+	// Получение всех участников гильдии
+	guild, err := s.Guild(m.GuildID)
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка получения списка участников.**")
+		log.Printf("Failed to fetch guild members: %v", err)
+		return
+	}
+
+	for _, member := range guild.Members {
+		if member.User.Bot {
+			continue
+		}
+		inv := r.Kki.GetUserCaseInventory(r, member.User.ID)
+		inv["holiday_case"] += count
+		r.Kki.SaveUserCaseInventory(r, member.User.ID, inv)
+	}
+
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ **Выдано** %d x 📦 **Праздничный кейс** (ID для открытия/передачи: holiday_case) всем участникам сервера!", count))
+}
+
+// HandleCaseHelpCommand !case_help
+func (r *Ranking) HandleCaseHelpCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	embed := &discordgo.MessageEmbed{
+		Title:       "📦 **Помощь по кейсам и NFT** ══════",
+		Description: "Список команд для работы с кейсами и NFT. Славь Императора! 👑",
+		Color:       0xFFD700,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "📜 **Пользовательские команды**",
+				Value:  "```!case_inventory - Показать инвентарь кейсов\n!inventory - Показать инвентарь NFT\n!open_case <caseID> - Открыть кейс\n!daily_case - Получить ежедневный кейс\n!case_trade @user <caseID> <count> - Купить кейс у игрока\n!trade_nft @user <nftID> <count> - Передать NFT игроку\n!sell <nftID> <count> - Продать NFT\n!nft_show <nftID> - Показать NFT всем```",
+				Inline: false,
+			},
+			{
+				Name:   "👑 **Админские команды**",
+				Value:  "```!a_give_case @user <caseID> - Выдать кейс игроку\n!a_give_nft @user <nftID> <count> - Выдать NFT игроку\n!a_remove_nft @user <nftID> <count> - Удалить NFT у игрока\n!a_holiday_case @user <count> - Выдать праздничный кейс\n!a_give_holiday_case_all <count> - Выдать праздничный кейс всем\n!sync_nfts - Синхронизировать NFT и кейсы\n!test_clear_all_nfts - Очистить все инвентари```",
+				Inline: false,
+			},
+		},
+		Footer: &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Вызвал: %s | Славь Императора! 👑", m.Author.Username)},
 	}
 	s.ChannelMessageSendEmbed(m.ChannelID, embed)
 }

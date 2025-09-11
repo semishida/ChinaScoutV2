@@ -395,6 +395,15 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 		}
 		log.Printf("Matched !a_holiday_case")
 		rank.HandleAdminHolidayCase(s, m, command)
+	case strings.HasPrefix(command, "!a_give_holiday_case_all "):
+		if !rank.IsAdmin(m.Author.ID) {
+			return
+		}
+		log.Printf("Matched !a_give_holiday_case_all")
+		rank.HandleAdminGiveHolidayCaseAll(s, m, command)
+	case command == "!case_help":
+		log.Printf("Matched !case_help")
+		rank.HandleCaseHelpCommand(s, m)
 	case strings.HasPrefix(command, "!show_nft "):
 		log.Printf("Matched !show_nft")
 		rank.HandleShowNFTCommand(s, m, command)
