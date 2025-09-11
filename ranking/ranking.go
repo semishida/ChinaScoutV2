@@ -472,19 +472,27 @@ func (r *Ranking) HandleCaseTradeCommand(s *discordgo.Session, m *discordgo.Mess
 		return
 	}
 
-	// Поддержка daily_case
+	// Унификация daily_case
 	if caseID == "daily" {
 		caseID = "daily_case"
 	}
 	kase, ok := r.Kki.cases[caseID]
 	if !ok {
-		s.ChannelMessageSend(m.ChannelID, "❌ **Некорректный кейс. Проверьте ID.**")
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ **Кейс с ID %s не найден. Проверьте ID.**", caseID))
 		return
 	}
 
 	sellerInv := r.Kki.GetUserCaseInventory(r, sellerID)
 	if sellerInv[caseID] < count {
-		s.ChannelMessageSend(m.ChannelID, "❌ **У продавца недостаточно кейсов.**")
+		sellerInvStr := ""
+		for id, c := range sellerInv {
+			k, _ := r.Kki.cases[id]
+			sellerInvStr += fmt.Sprintf("%s (ID: %s, x%d), ", k.Name, id, c)
+		}
+		if sellerInvStr == "" {
+			sellerInvStr = "пуст"
+		}
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ **У продавца недостаточно кейсов.** Инвентарь продавца: %s", sellerInvStr))
 		return
 	}
 
@@ -878,6 +886,7 @@ func (r *Ranking) ClearAllUserNFTs(s *discordgo.Session, m *discordgo.MessageCre
 	s.ChannelMessageSend(m.ChannelID, "❌ **Все NFT, кейсы и лимиты пользователей очищены.**")
 }
 
+// HandleCaseInventoryCommand отображает инвентарь кейсов пользователя и лимит открытия
 func (r *Ranking) HandleCaseInventoryCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	inv := r.Kki.GetUserCaseInventory(r, m.Author.ID)
 	if len(inv) == 0 {
@@ -887,11 +896,21 @@ func (r *Ranking) HandleCaseInventoryCommand(s *discordgo.Session, m *discordgo.
 
 	var lines []string
 	for caseID, count := range inv {
+		// Унификация daily_case
+		displayID := caseID
+		if caseID == "daily_case" {
+			displayID = "daily_case"
+		}
 		kase, ok := r.Kki.cases[caseID]
 		if !ok {
+			log.Printf("Case %s not found in r.Kki.cases for user %s", caseID, m.Author.ID)
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("📦 **%s** (x%d)\n📌 ID для открытия/передачи: %s\n💰 Цена: %d", kase.Name, count, caseID, kase.Price))
+		lines = append(lines, fmt.Sprintf("📦 **%s** (x%d)\n📌 ID для открытия/передачи: %s\n💰 Цена: %d", kase.Name, count, displayID, kase.Price))
+	}
+	if len(lines) == 0 {
+		s.ChannelMessageSend(m.ChannelID, "📦 **Инвентарь кейсов пуст** ══════\nИмператор ждёт, открывай кейсы! 😤")
+		return
 	}
 	sort.Strings(lines)
 
@@ -926,6 +945,13 @@ func (r *Ranking) HandleAdminGiveHolidayCaseAll(s *discordgo.Session, m *discord
 		return
 	}
 
+	// Проверка наличия holiday_case
+	if _, ok := r.Kki.cases["holiday_case"]; !ok {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Праздничный кейс (ID: holiday_case) не найден в базе.**")
+		log.Printf("holiday_case not found in r.Kki.cases")
+		return
+	}
+
 	// Получение всех участников гильдии
 	guild, err := s.Guild(m.GuildID)
 	if err != nil {
@@ -934,16 +960,23 @@ func (r *Ranking) HandleAdminGiveHolidayCaseAll(s *discordgo.Session, m *discord
 		return
 	}
 
+	successCount := 0
 	for _, member := range guild.Members {
 		if member.User.Bot {
 			continue
 		}
 		inv := r.Kki.GetUserCaseInventory(r, member.User.ID)
 		inv["holiday_case"] += count
-		r.Kki.SaveUserCaseInventory(r, member.User.ID, inv)
+		err := r.Kki.SaveUserCaseInventory(r, member.User.ID, inv)
+		if err != nil {
+			log.Printf("Failed to save case inventory for user %s: %v", member.User.ID, err)
+			continue
+		}
+		successCount++
+		log.Printf("Added %d holiday_case to user %s", count, member.User.ID)
 	}
 
-	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ **Выдано** %d x 📦 **Праздничный кейс** (ID для открытия/передачи: holiday_case) всем участникам сервера!", count))
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ **Выдано** %d x 📦 **Праздничный кейс** (ID для открытия/передачи: holiday_case) %d участникам сервера!", count, successCount))
 }
 
 // HandleCaseHelpCommand !case_help

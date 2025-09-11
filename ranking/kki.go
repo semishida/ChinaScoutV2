@@ -182,7 +182,8 @@ func (k *KKI) GetUserCaseInventory(r *Ranking, userID string) UserCaseInventory 
 }
 
 // SaveUserCaseInventory сохраняет инвентарь кейсов пользователя
-func (k *KKI) SaveUserCaseInventory(r *Ranking, userID string, inv UserCaseInventory) {
+func (k *KKI) SaveUserCaseInventory(r *Ranking, userID string, inv UserCaseInventory) error {
 	jsonData, _ := json.Marshal(inv)
 	r.redis.Set(r.ctx, "case_inventory:"+userID, jsonData, 0)
+	return nil
 }
