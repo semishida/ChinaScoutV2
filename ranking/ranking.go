@@ -1209,6 +1209,9 @@ func (r *Ranking) HandleResetCaseLimitsCommand(s *discordgo.Session, m *discordg
 		s.ChannelMessageSend(m.ChannelID, "❌ **Только админы могут использовать эту команду!**")
 		return
 	}
+
+	totalDeleted := 0
+
 	// Сброс лимитов на открытие кейсов
 	keys, err := r.redis.Keys(r.ctx, "case_limit:*").Result()
 	if err != nil {
@@ -1219,6 +1222,7 @@ func (r *Ranking) HandleResetCaseLimitsCommand(s *discordgo.Session, m *discordg
 	for _, key := range keys {
 		r.redis.Del(r.ctx, key)
 		log.Printf("Deleted case limit key: %s", key)
+		totalDeleted++
 	}
 
 	// Сброс лимитов на покупку кейсов
@@ -1231,6 +1235,7 @@ func (r *Ranking) HandleResetCaseLimitsCommand(s *discordgo.Session, m *discordg
 	for _, key := range keys {
 		r.redis.Del(r.ctx, key)
 		log.Printf("Deleted case buy limit key: %s", key)
+		totalDeleted++
 	}
 
 	// Сброс лимитов на ежедневный кейс
@@ -1243,9 +1248,17 @@ func (r *Ranking) HandleResetCaseLimitsCommand(s *discordgo.Session, m *discordg
 	for _, key := range keys {
 		r.redis.Del(r.ctx, key)
 		log.Printf("Deleted daily case key: %s", key)
+		totalDeleted++
 	}
 
-	s.ChannelMessageSend(m.ChannelID, "✅ **Все лимиты (открытие, покупка, ежедневный кейс) сброшены для всех пользователей!**")
+	if totalDeleted == 0 {
+		s.ChannelMessageSend(m.ChannelID, "ℹ️ **Лимиты не найдены для сброса. Возможно, они уже были сброшены автоматически в 4:00 по Красноярску.**")
+		log.Printf("No limits found to reset for command !a_reset_case_limits")
+		return
+	}
+
+	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ **Сброшено %d лимитов (открытие, покупка, ежедневный кейс) для всех пользователей!**", totalDeleted))
+	log.Printf("Reset %d limits for all users", totalDeleted)
 }
 
 // startDailyReset запускает горутину для сброса лимитов в 4:00 по Красноярску
