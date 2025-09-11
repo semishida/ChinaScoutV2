@@ -988,7 +988,7 @@ func (r *Ranking) HandleCaseHelpCommand(s *discordgo.Session, m *discordgo.Messa
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "📜 **Пользовательские команды**",
-				Value:  "```!case_inventory - Показать инвентарь кейсов\n!inventory - Показать инвентарь NFT\n!open_case <caseID> - Открыть кейс\n!daily_case - Получить ежедневный кейс\n!case_trade @user <caseID> <count> - Купить кейс у игрока\n!trade_nft @user <nftID> <count> - Передать NFT игроку\n!sell <nftID> <count> - Продать NFT\n!nft_show <nftID> - Показать NFT всем```",
+				Value:  "```!case_inventory - Показать инвентарь кейсов\n!inventory - Показать инвентарь NFT\n!open_case <caseID> - Открыть кейс\n!daily_case - Получить ежедневный кейс\n!trade_nft @user <nftID> <count> - Передать NFT игроку\n!sell <nftID> <count> - Продать NFT\n!nft_show <nftID> - Показать NFT всем```",
 				Inline: false,
 			},
 			{
