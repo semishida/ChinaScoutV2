@@ -18,9 +18,10 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// CaseBank представляет структуру банка кейсов
 type CaseBank struct {
-	Cases       map[string]int // caseID -> count
-	LastUpdated time.Time
+	Cases       map[string]int `json:"cases"`
+	LastUpdated time.Time      `json:"last_updated"`
 }
 
 var RarityEmojis = map[string]string{
@@ -1055,15 +1056,17 @@ func (r *Ranking) initializeCaseBank() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.caseBank.Cases = map[string]int{
-		"daily_case":   70,
-		"holiday_case": 70,
-		// Добавьте другие кейсы, если нужно
+	r.caseBank = &CaseBank{
+		Cases: map[string]int{
+			"daily_case":   70,
+			"holiday_case": 70,
+		},
+		LastUpdated: time.Now(),
 	}
-	r.caseBank.LastUpdated = time.Now()
 
 	jsonData, _ := json.Marshal(r.caseBank)
 	r.redis.Set(r.ctx, "case_bank", jsonData, 0)
+	log.Printf("Case bank initialized with daily_case: 70, holiday_case: 70")
 }
 
 // refreshCaseBank обновляет банк кейсов, если прошло 12 часов
@@ -1085,15 +1088,42 @@ func (r *Ranking) refreshCaseBank() {
 	r.caseBank = &bank
 
 	if time.Since(r.caseBank.LastUpdated) >= 12*time.Hour {
-		r.caseBank.Cases = map[string]int{
-			"daily_case":   70,
-			"holiday_case": 70,
+		// Получаем все доступные кейсы из таблицы
+		allCases := make([]string, 0, len(r.Kki.cases))
+		for caseID := range r.Kki.cases {
+			allCases = append(allCases, caseID)
 		}
+
+		// Рандомно выбираем 2 кейса (если меньше 2, выбираем все)
+		numToSelect := 2
+		if len(allCases) < numToSelect {
+			numToSelect = len(allCases)
+		}
+		selectedCases := randomShuffle(allCases)[:numToSelect]
+
+		// Устанавливаем 70 штук для каждого выбранного
+		newCases := make(map[string]int)
+		for _, caseID := range selectedCases {
+			newCases[caseID] = 70
+		}
+		r.caseBank.Cases = newCases
 		r.caseBank.LastUpdated = time.Now()
+
 		jsonData, _ := json.Marshal(r.caseBank)
 		r.redis.Set(r.ctx, "case_bank", jsonData, 0)
-		log.Printf("Case bank refreshed at %s", time.Now())
+		log.Printf("Case bank refreshed at %s with cases: %v", time.Now(), selectedCases)
 	}
+}
+
+// randomShuffle возвращает перемешанный слайс (Go не имеет встроенного random.shuffle)
+func randomShuffle(slice []string) []string {
+	n := len(slice)
+	rand.Seed(time.Now().UnixNano())
+	for i := n - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		slice[i], slice[j] = slice[j], slice[i]
+	}
+	return slice
 }
 
 // HandleCaseBankCommand !case_bank
