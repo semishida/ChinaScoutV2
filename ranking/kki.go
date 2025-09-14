@@ -60,7 +60,7 @@ var RarityColors = map[string]int{
 	"Epic":       0x9932CC,
 	"Nephrite":   0x00FF7F,
 	"Exotic":     0xFF4500,
-	"LEGENDARY":  0xFF0000,
+	"Legendary":  0xFF0000,
 }
 
 // RarityProbabilities определяет вероятности выпадения
@@ -71,7 +71,7 @@ var RarityProbabilities = []RarityProb{
 	{"Epic", 0.05},
 	{"Nephrite", 0.01},
 	{"Exotic", 0.01},
-	{"LEGENDARY", 0.005},
+	{"Legendary", 0.005},
 }
 
 // KKI управляет NFT и кейсами
@@ -293,7 +293,7 @@ func (r *Ranking) HandlePriceStatsCommand(s *discordgo.Session, m *discordgo.Mes
 	btcChange := ((btcPrice - btcAvg) / btcAvg) * 100
 
 	var lines []string
-	for _, rarity := range []string{"Common", "Rare", "Super-rare", "Epic", "Nephrite", "Exotic", "LEGENDARY"} {
+	for _, rarity := range []string{"Common", "Rare", "Super-rare", "Epic", "Nephrite", "Exotic", "Legendary"} {
 		// Ищем реальный NFT этой редкости для расчета
 		var exampleNFT *NFT
 		for _, nft := range r.Kki.nfts {

@@ -33,7 +33,7 @@ var RarityEmojis = map[string]string{
 	"Epic":       "🟨",
 	"Nephrite":   "🟥",
 	"Exotic":     "🟩",
-	"LEGENDARY":  "⭐",
+	"Legendary":  "⭐",
 }
 
 // BitcoinTracker отслеживает курс и волатильность BTC
@@ -53,7 +53,7 @@ var RarityVolatility = map[string]float64{
 	"Epic":       1.0, // ±100%
 	"Nephrite":   1.5, // ±150%
 	"Exotic":     2.0, // ±200%
-	"LEGENDARY":  3.0, // ±300%
+	"Legendary":  3.0, // ±300%
 }
 
 // BaseRarityPrices базовые цены в USD для каждой редкости
@@ -64,7 +64,7 @@ var BaseRarityPrices = map[string]float64{
 	"Epic":       1000,
 	"Nephrite":   5000,
 	"Exotic":     5000,
-	"LEGENDARY":  10000,
+	"Legendary":  10000,
 }
 
 // Ranking управляет рейтингами, опросами, играми и голосовой активностью.
@@ -653,7 +653,7 @@ func (r *Ranking) HandleOpenCaseCommand(s *discordgo.Session, m *discordgo.Messa
 
 	// Анимация в горутине
 	go func() {
-		rarities := []string{"Common", "Rare", "Super-rare", "Epic", "Nephrite", "Exotic", "LEGENDARY"}
+		rarities := []string{"Common", "Rare", "Super-rare", "Epic", "Nephrite", "Exotic", "Legendary"}
 		for i := 0; i < 10; i++ {
 			randRarity := rarities[rand.Intn(len(rarities))]
 			embed := &discordgo.MessageEmbed{
