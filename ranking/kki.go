@@ -131,16 +131,25 @@ func (k *KKI) SyncFromSheets(r *Ranking) error {
 			continue
 		}
 
+		rarity := fmt.Sprintf("%v", row[4])
+		basePrice, exists := BaseRarityPrices[rarity]
+		if !exists {
+			log.Printf("Warning: Unknown rarity '%s', using default price 10", rarity)
+			basePrice = 10
+		}
+
 		nft := NFT{
 			ID:           fmt.Sprintf("%v", row[0]),
 			Name:         fmt.Sprintf("%v", row[1]),
 			Description:  fmt.Sprintf("%v", row[2]),
 			ReleaseDate:  fmt.Sprintf("%v", row[3]),
-			Rarity:       fmt.Sprintf("%v", row[4]),
+			Rarity:       rarity,
 			Collection:   fmt.Sprintf("%v", row[5]),
 			ImageURL:     fmt.Sprintf("%v", row[6]),
-			BasePriceUSD: BaseRarityPrices[fmt.Sprintf("%v", row[4])],
+			BasePriceUSD: basePrice,
 		}
+
+		log.Printf("Loaded NFT: %s, Rarity: %s, BasePrice: $%.0f", nft.Name, nft.Rarity, nft.BasePriceUSD)
 
 		// Вычисляем текущую цену
 		nft.Price = r.CalculateNFTPrice(nft)
@@ -150,6 +159,8 @@ func (k *KKI) SyncFromSheets(r *Ranking) error {
 		jsonData, _ := json.Marshal(nft)
 		r.redis.Set(r.ctx, "nft:"+nft.ID, jsonData, 0)
 	}
+
+	log.Printf("Total NFTs loaded: %d", len(k.nfts))
 
 	// Загрузка кейсов
 	resp, err = k.sheets.Spreadsheets.Values.Get(os.Getenv("GOOGLE_SHEETS_ID"), "Cases!A:D").Do()
@@ -270,6 +281,12 @@ func (r *Ranking) HandleBitcoinPriceCommand(s *discordgo.Session, m *discordgo.M
 
 // HandlePriceStatsCommand !price_stats - детальная статистика
 func (r *Ranking) HandlePriceStatsCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	// Добавляем проверку на загруженные NFT
+	if len(r.Kki.nfts) == 0 {
+		s.ChannelMessageSend(m.ChannelID, "❌ **NFT не загружены! Используйте !sync_nfts**")
+		return
+	}
+
 	btcPrice := r.BitcoinTracker.CurrentPrice
 	btcAvg := r.BitcoinTracker.Get24hAverage()
 	btcVolatility := r.BitcoinTracker.CalculateVolatility() * 100
@@ -277,9 +294,25 @@ func (r *Ranking) HandlePriceStatsCommand(s *discordgo.Session, m *discordgo.Mes
 
 	var lines []string
 	for _, rarity := range []string{"Common", "Rare", "Super-rare", "Epic", "Nephrite", "Exotic", "LEGENDARY"} {
-		basePrice := BaseRarityPrices[rarity]
-		currentPrice := r.CalculateNFTPrice(NFT{Rarity: rarity})
-		volatility := RarityVolatility[rarity] * 100
+		// Ищем реальный NFT этой редкости для расчета
+		var exampleNFT *NFT
+		for _, nft := range r.Kki.nfts {
+			if nft.Rarity == rarity {
+				exampleNFT = &nft
+				break
+			}
+		}
+
+		// Если не нашли NFT такой редкости, используем базовую цену
+		if exampleNFT == nil {
+			basePrice := BaseRarityPrices[rarity]
+			lines = append(lines, fmt.Sprintf("%s **%s**:\n- Базовая: $%.0f\n- Текущая: $%.0f\n- Изменение: 0.0%% ➡️\n- Волатильность: %.0f%%",
+				RarityEmojis[rarity], rarity, basePrice, basePrice, RarityVolatility[rarity]*100))
+			continue
+		}
+
+		currentPrice := r.CalculateNFTPrice(*exampleNFT)
+		basePrice := exampleNFT.BasePriceUSD
 
 		change := (float64(currentPrice) - basePrice) / basePrice * 100
 		emoji := "➡️"
@@ -297,7 +330,7 @@ func (r *Ranking) HandlePriceStatsCommand(s *discordgo.Session, m *discordgo.Mes
 		}
 
 		lines = append(lines, fmt.Sprintf("%s **%s**:\n- Базовая: $%.0f\n- Текущая: $%d\n- Изменение: %.1f%% %s\n- Волатильность: %.0f%%",
-			RarityEmojis[rarity], rarity, basePrice, currentPrice, change, emoji, volatility))
+			RarityEmojis[rarity], rarity, basePrice, currentPrice, change, emoji, RarityVolatility[rarity]*100))
 	}
 
 	embed := &discordgo.MessageEmbed{

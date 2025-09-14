@@ -181,9 +181,7 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string
 
 	// Инициализация банка кейсов
 	r.initializeCaseBank()
-
-	// Запуск обновления курса BTC
-	go r.StartPriceUpdater()
+	// Запуск обновления банка кейсов каждые 10 минут
 	go r.StartBitcoinUpdater() // <- ДОБАВЬТЕ ЭТУ СТРОКУ
 
 	return r, nil
@@ -1632,6 +1630,17 @@ func (bt *BitcoinTracker) CalculateVolatility() float64 {
 
 // CalculateNFTPrice вычисляет текущую цену NFT
 func (r *Ranking) CalculateNFTPrice(nft NFT) int {
+	// Защита от нулевой базовой цены
+	if nft.BasePriceUSD == 0 {
+		log.Printf("WARNING: Zero base price for NFT %s (Rarity: %s)", nft.Name, nft.Rarity)
+		// Используем базовую цену из мапы как fallback
+		basePrice, exists := BaseRarityPrices[nft.Rarity]
+		if !exists {
+			basePrice = 10 // Fallback значение
+		}
+		nft.BasePriceUSD = basePrice
+	}
+
 	basePrice := nft.BasePriceUSD
 	rarityVolatility := RarityVolatility[nft.Rarity]
 
