@@ -63,8 +63,8 @@ var BaseRarityPrices = map[string]float64{
 	"Super-rare": 200,
 	"Epic":       1000,
 	"Nephrite":   5000,
-	"Exotic":     20000,
-	"LEGENDARY":  100000,
+	"Exotic":     5000,
+	"LEGENDARY":  10000,
 }
 
 // Ranking управляет рейтингами, опросами, играми и голосовой активностью.
@@ -181,6 +181,10 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string
 
 	// Инициализация банка кейсов
 	r.initializeCaseBank()
+
+	// Запуск обновления курса BTC
+	go r.StartPriceUpdater()
+	go r.StartBitcoinUpdater() // <- ДОБАВЬТЕ ЭТУ СТРОКУ
 
 	return r, nil
 }
@@ -1524,19 +1528,44 @@ func (r *Ranking) Stop() {
 // GetBitcoinPrice получает текущий курс биткойна
 func (r *Ranking) GetBitcoinPrice() (float64, error) {
 	cacheKey := "bitcoin_price"
+
+	// Пробуем получить из кэша
 	cached, err := r.redis.Get(r.ctx, cacheKey).Result()
 	if err == nil {
-		return strconv.ParseFloat(cached, 64)
+		cachedPrice, _ := strconv.ParseFloat(cached, 64)
+		// Если кэш свежий (менее 10 минут), используем его
+		if time.Since(r.BitcoinTracker.LastUpdate) < 10*time.Minute {
+			return cachedPrice, nil
+		}
 	}
 
+	// Получаем свежий курс
 	resp, err := http.Get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd")
 	if err != nil {
+		log.Printf("Ошибка запроса к CoinGecko: %v", err)
+
+		// Fallback: используем последнее известное значение
+		if r.BitcoinTracker.CurrentPrice > 0 {
+			return r.BitcoinTracker.CurrentPrice, nil
+		}
 		return 0, err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != 200 {
+		log.Printf("CoinGecko API вернул статус: %d", resp.StatusCode)
+		if r.BitcoinTracker.CurrentPrice > 0 {
+			return r.BitcoinTracker.CurrentPrice, nil
+		}
+		return 0, fmt.Errorf("API вернул статус %d", resp.StatusCode)
+	}
+
 	var data map[string]map[string]float64
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		log.Printf("Ошибка парсинга ответа CoinGecko: %v", err)
+		if r.BitcoinTracker.CurrentPrice > 0 {
+			return r.BitcoinTracker.CurrentPrice, nil
+		}
 		return 0, err
 	}
 
@@ -1550,12 +1579,14 @@ func (r *Ranking) GetBitcoinPrice() (float64, error) {
 
 	// Сохраняем в историю (последние 24 часа)
 	r.BitcoinTracker.PriceHistory = append(r.BitcoinTracker.PriceHistory, price)
-	if len(r.BitcoinTracker.PriceHistory) > 96 { // 96 записей = 24 часа (каждые 15 мин)
+	if len(r.BitcoinTracker.PriceHistory) > 288 { // 288 записей = 24 часа (каждые 5 мин)
 		r.BitcoinTracker.PriceHistory = r.BitcoinTracker.PriceHistory[1:]
 	}
 	r.BitcoinTracker.mu.Unlock()
 
-	r.redis.Set(r.ctx, cacheKey, fmt.Sprintf("%.2f", price), 5*time.Minute)
+	// Сохраняем в Redis на 10 минут
+	r.redis.Set(r.ctx, cacheKey, fmt.Sprintf("%.2f", price), 10*time.Minute)
+
 	return price, nil
 }
 
@@ -1636,4 +1667,52 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// StartBitcoinUpdater запускает обновление курса BTC каждые 5 минут
+func (r *Ranking) StartBitcoinUpdater() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				price, err := r.GetBitcoinPrice()
+				if err != nil {
+					log.Printf("Ошибка обновления курса BTC: %v", err)
+					continue
+				}
+				log.Printf("✅ Курс BTC обновлен: $%.2f", price)
+			case <-r.stopResetChan:
+				return
+			}
+		}
+	}()
+}
+
+// getBitcoinPriceFromAlternative получает курс с альтернативного API
+func (r *Ranking) getBitcoinPriceFromAlternative() (float64, error) {
+	// Попробуем Binance API
+	resp, err := http.Get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT")
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var binanceData struct {
+		Symbol string `json:"symbol"`
+		Price  string `json:"price"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&binanceData); err != nil {
+		return 0, err
+	}
+
+	price, err := strconv.ParseFloat(binanceData.Price, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return price, nil
 }
