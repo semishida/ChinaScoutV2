@@ -4,10 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"math"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/go-redis/redis/v8"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
@@ -15,14 +20,16 @@ import (
 
 // NFT представляет структуру NFT из Google Sheets
 type NFT struct {
-	ID          string
-	Name        string
-	Description string
-	ReleaseDate string
-	Rarity      string
-	Price       int
-	Collection  string
-	ImageURL    string
+	ID           string
+	Name         string
+	Description  string
+	ReleaseDate  string
+	Rarity       string
+	Price        int
+	Collection   string
+	ImageURL     string
+	BasePriceUSD float64   // Базовая цена из мапы
+	LastUpdated  time.Time // Время последнего обновления цены
 }
 
 // Case представляет кейс с коллекциями
@@ -110,7 +117,7 @@ func (k *KKI) SyncFromSheets(r *Ranking) error {
 	defer k.mu.Unlock()
 
 	// Загрузка NFT
-	resp, err := k.sheets.Spreadsheets.Values.Get(os.Getenv("GOOGLE_SHEETS_ID"), "NFTs!A:H").Do()
+	resp, err := k.sheets.Spreadsheets.Values.Get(os.Getenv("GOOGLE_SHEETS_ID"), "NFTs!A:G").Do()
 	if err != nil {
 		return fmt.Errorf("не удалось загрузить NFTs: %v", err)
 	}
@@ -118,22 +125,27 @@ func (k *KKI) SyncFromSheets(r *Ranking) error {
 	k.nfts = make(map[string]NFT)
 	for i, row := range resp.Values {
 		if i == 0 {
-			continue // Пропускаем заголовок
-		}
-		if len(row) < 8 {
 			continue
 		}
-		price, _ := strconv.Atoi(fmt.Sprintf("%v", row[5]))
-		nft := NFT{
-			ID:          fmt.Sprintf("%v", row[0]),
-			Name:        fmt.Sprintf("%v", row[1]),
-			Description: fmt.Sprintf("%v", row[2]),
-			ReleaseDate: fmt.Sprintf("%v", row[3]),
-			Rarity:      fmt.Sprintf("%v", row[4]),
-			Price:       price,
-			Collection:  fmt.Sprintf("%v", row[6]),
-			ImageURL:    fmt.Sprintf("%v", row[7]),
+		if len(row) < 7 {
+			continue
 		}
+
+		nft := NFT{
+			ID:           fmt.Sprintf("%v", row[0]),
+			Name:         fmt.Sprintf("%v", row[1]),
+			Description:  fmt.Sprintf("%v", row[2]),
+			ReleaseDate:  fmt.Sprintf("%v", row[3]),
+			Rarity:       fmt.Sprintf("%v", row[4]),
+			Collection:   fmt.Sprintf("%v", row[5]),
+			ImageURL:     fmt.Sprintf("%v", row[6]),
+			BasePriceUSD: BaseRarityPrices[fmt.Sprintf("%v", row[4])],
+		}
+
+		// Вычисляем текущую цену
+		nft.Price = r.CalculateNFTPrice(nft)
+		nft.LastUpdated = time.Now()
+
 		k.nfts[nft.ID] = nft
 		jsonData, _ := json.Marshal(nft)
 		r.redis.Set(r.ctx, "nft:"+nft.ID, jsonData, 0)
@@ -186,4 +198,114 @@ func (k *KKI) SaveUserCaseInventory(r *Ranking, userID string, inv UserCaseInven
 	jsonData, _ := json.Marshal(inv)
 	r.redis.Set(r.ctx, "case_inventory:"+userID, jsonData, 0)
 	return nil
+}
+
+// StartPriceUpdater запускает обновление цен каждые 15 минут
+func (r *Ranking) StartPriceUpdater() {
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				log.Printf("🔄 Автоматическое обновление цен NFT...")
+
+				// Обновляем курс BTC
+				_, err := r.GetBitcoinPrice()
+				if err != nil {
+					log.Printf("Ошибка обновления курса BTC: %v", err)
+					continue
+				}
+
+				// Обновляем цены всех NFT
+				r.mu.Lock()
+				for id, nft := range r.Kki.nfts {
+					newPrice := r.CalculateNFTPrice(nft)
+					if newPrice != nft.Price {
+						nft.Price = newPrice
+						nft.LastUpdated = time.Now()
+						r.Kki.nfts[id] = nft
+
+						// Обновляем в Redis
+						jsonData, _ := json.Marshal(nft)
+						r.redis.Set(r.ctx, "nft:"+nft.ID, jsonData, 0)
+					}
+				}
+				r.mu.Unlock()
+
+				log.Printf("✅ Цены NFT обновлены по курсу BTC: $%.2f", r.BitcoinTracker.CurrentPrice)
+
+			case <-r.stopResetChan:
+				return
+			}
+		}
+	}()
+}
+
+// HandleBitcoinPriceCommand !btc
+func (r *Ranking) HandleBitcoinPriceCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	price := r.BitcoinTracker.CurrentPrice
+	avgPrice := r.BitcoinTracker.Get24hAverage()
+	volatility := r.BitcoinTracker.CalculateVolatility() * 100
+
+	change := ((price - avgPrice) / avgPrice) * 100
+	changeEmoji := "➡️"
+	if change > 5 {
+		changeEmoji = "📈"
+	}
+	if change < -5 {
+		changeEmoji = "📉"
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title: "💰 Курс биткойна",
+		Description: fmt.Sprintf("**Текущая цена**: $%.2f %s\n**24ч средняя**: $%.2f\n**Изменение**: %.1f%%\n**Волатильность**: %.1f%%",
+			price, changeEmoji, avgPrice, change, volatility),
+		Color:  0xF7931A,
+		Footer: &discordgo.MessageEmbedFooter{Text: "Влияет на цены редких NFT"},
+	}
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+}
+
+// HandlePriceStatsCommand !price_stats - детальная статистика
+func (r *Ranking) HandlePriceStatsCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	btcPrice := r.BitcoinTracker.CurrentPrice
+	btcAvg := r.BitcoinTracker.Get24hAverage()
+	btcVolatility := r.BitcoinTracker.CalculateVolatility() * 100
+	btcChange := ((btcPrice - btcAvg) / btcAvg) * 100
+
+	var lines []string
+	for _, rarity := range []string{"Common", "Rare", "Super-rare", "Epic", "Nephrite", "Exotic", "LEGENDARY"} {
+		basePrice := BaseRarityPrices[rarity]
+		currentPrice := r.CalculateNFTPrice(NFT{Rarity: rarity})
+		volatility := RarityVolatility[rarity] * 100
+
+		change := (float64(currentPrice) - basePrice) / basePrice * 100
+		emoji := "➡️"
+		if change > 5 {
+			emoji = "📈"
+		}
+		if change < -5 {
+			emoji = "📉"
+		}
+		if math.Abs(change) > 20 {
+			emoji = "🚀"
+		}
+		if math.Abs(change) < -20 {
+			emoji = "💥"
+		}
+
+		lines = append(lines, fmt.Sprintf("%s **%s**:\n- Базовая: $%.0f\n- Текущая: $%d\n- Изменение: %.1f%% %s\n- Волатильность: %.0f%%",
+			RarityEmojis[rarity], rarity, basePrice, currentPrice, change, emoji, volatility))
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title: "📊 **Детальная статистика цен**",
+		Description: fmt.Sprintf("💰 **BTC**: $%.2f (Δ %.1f%%, волатильность %.1f%%)\n\n%s",
+			btcPrice, btcChange, btcVolatility, strings.Join(lines, "\n\n")),
+		Color:  0x00BFFF,
+		Footer: &discordgo.MessageEmbedFooter{Text: "Цены обновляются каждые 15 минут"},
+	}
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
 }

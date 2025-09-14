@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -34,6 +36,37 @@ var RarityEmojis = map[string]string{
 	"LEGENDARY":  "⭐",
 }
 
+// BitcoinTracker отслеживает курс и волатильность BTC
+type BitcoinTracker struct {
+	CurrentPrice  float64
+	PreviousPrice float64
+	LastUpdate    time.Time
+	PriceHistory  []float64
+	mu            sync.Mutex
+}
+
+// RarityVolatility определяет волатильность цены для каждой редкости
+var RarityVolatility = map[string]float64{
+	"Common":     0.1, // ±10%
+	"Rare":       0.3, // ±30%
+	"Super-rare": 0.6, // ±60%
+	"Epic":       1.0, // ±100%
+	"Nephrite":   1.5, // ±150%
+	"Exotic":     2.0, // ±200%
+	"LEGENDARY":  3.0, // ±300%
+}
+
+// BaseRarityPrices базовые цены в USD для каждой редкости
+var BaseRarityPrices = map[string]float64{
+	"Common":     10,
+	"Rare":       50,
+	"Super-rare": 200,
+	"Epic":       1000,
+	"Nephrite":   5000,
+	"Exotic":     20000,
+	"LEGENDARY":  100000,
+}
+
 // Ranking управляет рейтингами, опросами, играми и голосовой активностью.
 type Ranking struct {
 	mu                sync.Mutex
@@ -54,6 +87,7 @@ type Ranking struct {
 	sellMessageIDs    map[string]string // userID -> messageID
 	caseBank          *CaseBank
 	stopResetChan     chan struct{}
+	BitcoinTracker    *BitcoinTracker // НОВОЕ ПОЛЕ
 }
 
 // NewRanking инициализирует структуру Ranking.
@@ -80,6 +114,9 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string
 		caseBank: &CaseBank{
 			Cases:       make(map[string]int),
 			LastUpdated: time.Now(),
+		},
+		BitcoinTracker: &BitcoinTracker{
+			PriceHistory: make([]float64, 0),
 		},
 	}
 
@@ -117,6 +154,14 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string
 	for _, id := range admins.IDs {
 		r.admins[id] = true
 	}
+
+	// Первоначальное получение курса BTC
+	if _, err := r.GetBitcoinPrice(); err != nil {
+		log.Printf("Предупреждение: не удалось получить курс BTC: %v", err)
+	}
+
+	// Запускаем обновление цен
+	go r.StartPriceUpdater()
 
 	r.stopResetChan = make(chan struct{})
 	go r.startDailyReset()
@@ -1028,52 +1073,153 @@ func (r *Ranking) HandleAdminGiveHolidayCaseAll(s *discordgo.Session, m *discord
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("✅ **Выдано** %d x 📦 **Праздничный кейс** (ID для открытия/передачи: holiday_case) %d участникам сервера!", count, successCount))
 }
 
-// HandleCaseHelpCommand !case_help
+// HandleCaseHelpCommand !case_help - обновленная версия
 func (r *Ranking) HandleCaseHelpCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	embed := &discordgo.MessageEmbed{
-		Title:       "📦 **Помощь по кейсам и NFT** ══════",
-		Description: "Список команд для работы с кейсами и NFT. Славь Императора! 👑",
+		Title:       "📦 **Помощь по кейсам, NFT и экономике** ══════",
+		Description: "Славь Императора! 👑 Динамическая экономика привязана к курсу BTC",
 		Color:       0xFFD700,
 		Fields: []*discordgo.MessageEmbedField{
 			{
-				Name:   "📜 **Пользовательские команды**",
-				Value:  "```!case_inventory - Показать инвентарь кейсов\n!inventory - Показать инвентарь NFT\n!open_case <caseID> - Открыть кейс\n!daily_case - Получить ежедневный кейс\n!trade_nft @user <nftID> <count> - Передать NFT игроку\n!sell <nftID> <count> - Продать NFT\n!case_trade @user <caseID> <count> - Купить кейс у игрока\n!case_bank - Показать кейсы в банке\n!buy_case_bank <caseID> <count> - Купить кейс из банка\n!nft_show <nftID> - Показать NFT всем```",
-				Inline: false,
+				Name:   "💰 **Экономика и цены**",
+				Value:  "```!btc - Текущий курс биткойна\n!prices - Динамика цен по редкостям\n!price_stats - Подробная статистика цен```",
+				Inline: true,
+			},
+			{
+				Name:   "📦 **Кейсы и инвентарь**",
+				Value:  "```!case_inventory - Мои кейсы\n!open_case <ID> - Открыть кейс\n!daily_case - Ежедневный кейс\n!case_bank - Кейсы в банке\n!buy_case_bank <ID> <count> - Купить из банка\n!case_trade @user <ID> <count> - Купить у игрока```",
+				Inline: true,
+			},
+			{
+				Name:   "🃏 **NFT и торговля**",
+				Value:  "```!inventory - Мои NFT\n!nft_show <ID> - Показать NFT\n!sell <ID> <count> - Продать NFT\n!trade_nft @user <ID> <count> - Передать NFT\n!market - Рыночные цены (скоро)```",
+				Inline: true,
 			},
 			{
 				Name:   "👑 **Админские команды**",
-				Value:  "```!a_give_case @user <caseID> - Выдать кейс игроку\n!a_give_nft @user <nftID> <count> - Выдать NFT игроку\n!a_remove_nft @user <nftID> <count> - Удалить NFT у игрока\n!a_holiday_case @user <count> - Выдать праздничный кейс\n!a_give_holiday_case_all <count> - Выдать праздничный кейс всем\n!sync_nfts - Синхронизировать NFT и кейсы\n!test_clear_all_nfts - Очистить все инвентари и банк\n!a_reset_case_limits - Сбросить ВСЕМ лимиты на открытие, покупку и ежедневный кейс```",
+				Value:  "```!sync_nfts - Синхронизация с Sheets\n!a_give_case @user <ID> - Выдать кейс\n!a_give_nft @user <ID> <count> - Выдать NFT\n!a_remove_nft @user <ID> <count> - Удалить NFT\n!a_refresh_bank - Обновить банк кейсов\n!a_reset_case_limits - Сбросить лимиты\n!test_clear_all_nfts - Очистить всё```",
 				Inline: false,
 			},
 		},
-		Footer: &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Вызвал: %s | Славь Императора! 👑", m.Author.Username)},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: fmt.Sprintf("Вызвал: %s | Редкие NFT зависят от курса BTC!", m.Author.Username),
+		},
 	}
 	s.ChannelMessageSendEmbed(m.ChannelID, embed)
 }
 
-// initializeCaseBank инициализирует банк кейсов
+// initializeCaseBank инициализирует банк кейсов случайными кейсами
 func (r *Ranking) initializeCaseBank() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.caseBank = &CaseBank{
-		Cases: map[string]int{
-			"daily_case":   70,
-			"holiday_case": 70,
-		},
-		LastUpdated: time.Now(),
+	// Получаем все доступные кейсы
+	allCases := make([]string, 0, len(r.Kki.cases))
+	for caseID := range r.Kki.cases {
+		allCases = append(allCases, caseID)
 	}
 
-	jsonData, _ := json.Marshal(r.caseBank)
-	r.redis.Set(r.ctx, "case_bank", jsonData, 0)
-	log.Printf("Case bank initialized with daily_case: 70, holiday_case: 70")
+	// Выбираем 2 случайных кейса
+	if len(allCases) > 0 {
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(allCases), func(i, j int) {
+			allCases[i], allCases[j] = allCases[j], allCases[i]
+		})
+
+		numToSelect := min(2, len(allCases))
+		selectedCases := allCases[:numToSelect]
+
+		newCases := make(map[string]int)
+		for _, caseID := range selectedCases {
+			newCases[caseID] = 70
+		}
+
+		r.caseBank = &CaseBank{
+			Cases:       newCases,
+			LastUpdated: time.Now(),
+		}
+
+		jsonData, _ := json.Marshal(r.caseBank)
+		r.redis.Set(r.ctx, "case_bank", jsonData, 0)
+		log.Printf("Case bank initialized with: %v", selectedCases)
+	} else {
+		// Fallback если кейсов нет
+		r.caseBank = &CaseBank{
+			Cases:       make(map[string]int),
+			LastUpdated: time.Now(),
+		}
+		log.Printf("Case bank initialized empty - no cases available")
+	}
 }
 
-// refreshCaseBank обновляет банк кейсов, если прошло 12 часов
+// HandleAdminRefreshBankCommand !a_refresh_bank
+func (r *Ranking) HandleAdminRefreshBankCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if !r.IsAdmin(m.Author.ID) {
+		s.ChannelMessageSend(m.ChannelID, "❌ **Только админы могут использовать эту команду!**")
+		return
+	}
+
+	// Принудительно обновляем банк
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Получаем ВСЕ доступные кейсы из таблицы
+	allCases := make([]string, 0, len(r.Kki.cases))
+	for caseID := range r.Kki.cases {
+		allCases = append(allCases, caseID)
+	}
+
+	// Рандомно выбираем 2 кейса
+	if len(allCases) < 2 {
+		s.ChannelMessageSend(m.ChannelID, "❌ **В таблице меньше 2 кейсов!**")
+		return
+	}
+
+	// Перемешиваем и выбираем 2 случайных кейса
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(allCases), func(i, j int) {
+		allCases[i], allCases[j] = allCases[j], allCases[i]
+	})
+	selectedCases := allCases[:2]
+
+	// Устанавливаем по 70 штук для каждого выбранного кейса
+	newCases := make(map[string]int)
+	for _, caseID := range selectedCases {
+		newCases[caseID] = 70
+	}
+
+	r.caseBank.Cases = newCases
+	r.caseBank.LastUpdated = time.Now()
+
+	// Сохраняем в Redis
+	jsonData, _ := json.Marshal(r.caseBank)
+	r.redis.Set(r.ctx, "case_bank", jsonData, 0)
+
+	// Формируем список выбранных кейсов для ответа
+	var caseList []string
+	for _, caseID := range selectedCases {
+		kase := r.Kki.cases[caseID]
+		caseList = append(caseList, fmt.Sprintf("📦 **%s** (ID: `%s`)", kase.Name, caseID))
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title: "🔄 **Банк кейсов обновлен!**",
+		Description: fmt.Sprintf("Выбраны случайные кейсы:\n%s\n\nКоличество: **70** каждого\nОбновлено: %s",
+			strings.Join(caseList, "\n"), time.Now().Format("15:04:05")),
+		Color:  0x00FF00,
+		Footer: &discordgo.MessageEmbedFooter{Text: "Император одобряет случайный выбор!"},
+	}
+
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	log.Printf("Банк кейсов обновлен вручную: %v", selectedCases)
+}
+
+// refreshCaseBank обновляет банк кейсов случайными кейсами из таблицы
 func (r *Ranking) refreshCaseBank() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Загружаем текущий банк из Redis
 	jsonData, err := r.redis.Get(r.ctx, "case_bank").Bytes()
 	if err == redis.Nil {
 		r.initializeCaseBank()
@@ -1087,7 +1233,8 @@ func (r *Ranking) refreshCaseBank() {
 	}
 	r.caseBank = &bank
 
-	if time.Since(r.caseBank.LastUpdated) >= 12*time.Hour {
+	// Обновляем если прошло 12 часов ИЛИ если банк пустой
+	if time.Since(r.caseBank.LastUpdated) >= 12*time.Hour || len(r.caseBank.Cases) == 0 {
 		// Получаем все доступные кейсы из таблицы
 		allCases := make([]string, 0, len(r.Kki.cases))
 		for caseID := range r.Kki.cases {
@@ -1099,13 +1246,20 @@ func (r *Ranking) refreshCaseBank() {
 		if len(allCases) < numToSelect {
 			numToSelect = len(allCases)
 		}
-		selectedCases := randomShuffle(allCases)[:numToSelect]
 
-		// Устанавливаем 70 штук для каждого выбранного
+		// Перемешиваем массив
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(allCases), func(i, j int) {
+			allCases[i], allCases[j] = allCases[j], allCases[i]
+		})
+		selectedCases := allCases[:numToSelect]
+
+		// Устанавливаем по 70 штук для каждого выбранного кейса
 		newCases := make(map[string]int)
 		for _, caseID := range selectedCases {
-			newCases[caseID] = 70
+			newCases[caseID] = 50
 		}
+
 		r.caseBank.Cases = newCases
 		r.caseBank.LastUpdated = time.Now()
 
@@ -1364,4 +1518,121 @@ func (r *Ranking) resetAllLimits() {
 // Stop прекращает работу горутины сброса лимитов
 func (r *Ranking) Stop() {
 	close(r.stopResetChan)
+}
+
+// GetBitcoinPrice получает текущий курс биткойна
+func (r *Ranking) GetBitcoinPrice() (float64, error) {
+	cacheKey := "bitcoin_price"
+	cached, err := r.redis.Get(r.ctx, cacheKey).Result()
+	if err == nil {
+		return strconv.ParseFloat(cached, 64)
+	}
+
+	resp, err := http.Get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd")
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var data map[string]map[string]float64
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return 0, err
+	}
+
+	price := data["bitcoin"]["usd"]
+
+	// Обновляем трекер
+	r.BitcoinTracker.mu.Lock()
+	r.BitcoinTracker.PreviousPrice = r.BitcoinTracker.CurrentPrice
+	r.BitcoinTracker.CurrentPrice = price
+	r.BitcoinTracker.LastUpdate = time.Now()
+
+	// Сохраняем в историю (последние 24 часа)
+	r.BitcoinTracker.PriceHistory = append(r.BitcoinTracker.PriceHistory, price)
+	if len(r.BitcoinTracker.PriceHistory) > 96 { // 96 записей = 24 часа (каждые 15 мин)
+		r.BitcoinTracker.PriceHistory = r.BitcoinTracker.PriceHistory[1:]
+	}
+	r.BitcoinTracker.mu.Unlock()
+
+	r.redis.Set(r.ctx, cacheKey, fmt.Sprintf("%.2f", price), 5*time.Minute)
+	return price, nil
+}
+
+// Get24hAverage возвращает среднюю цену BTC за 24 часа
+func (bt *BitcoinTracker) Get24hAverage() float64 {
+	bt.mu.Lock()
+	defer bt.mu.Unlock()
+
+	if len(bt.PriceHistory) == 0 {
+		return bt.CurrentPrice
+	}
+
+	sum := 0.0
+	for _, price := range bt.PriceHistory {
+		sum += price
+	}
+	return sum / float64(len(bt.PriceHistory))
+}
+
+// CalculateVolatility вычисляет волатильность BTC
+func (bt *BitcoinTracker) CalculateVolatility() float64 {
+	bt.mu.Lock()
+	defer bt.mu.Unlock()
+
+	if len(bt.PriceHistory) < 2 {
+		return 0.1
+	}
+
+	min := bt.PriceHistory[0]
+	max := bt.PriceHistory[0]
+
+	for _, price := range bt.PriceHistory {
+		if price < min {
+			min = price
+		}
+		if price > max {
+			max = price
+		}
+	}
+
+	return (max - min) / ((max + min) / 2)
+}
+
+// CalculateNFTPrice вычисляет текущую цену NFT
+func (r *Ranking) CalculateNFTPrice(nft NFT) int {
+	basePrice := nft.BasePriceUSD
+	rarityVolatility := RarityVolatility[nft.Rarity]
+
+	// Для Common и Rare - фиксированная цена
+	if rarityVolatility <= 0.3 {
+		return int(basePrice)
+	}
+
+	// Для редких NFT - динамическая цена
+	btcVolatility := r.BitcoinTracker.CalculateVolatility()
+	currentBtcPrice := r.BitcoinTracker.CurrentPrice
+	averageBtcPrice := r.BitcoinTracker.Get24hAverage()
+
+	// Отклонение BTC от среднего
+	btcDeviation := (currentBtcPrice - averageBtcPrice) / averageBtcPrice
+
+	// Сила воздействия = волатильность BTC * множитель редкости
+	impactStrength := btcVolatility * rarityVolatility
+
+	// Применяем воздействие
+	volatilityMultiplier := 1.0 + (btcDeviation * impactStrength)
+
+	// Ограничиваем разброс
+	volatilityMultiplier = math.Max(0.1, math.Min(10.0, volatilityMultiplier))
+
+	finalPrice := basePrice * volatilityMultiplier
+	return int(finalPrice)
+}
+
+// min возвращает минимальное из двух чисел
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

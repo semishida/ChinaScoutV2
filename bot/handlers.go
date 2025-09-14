@@ -9,6 +9,7 @@ import (
 
 	"csv2/ranking"
 	"csv2/utils"
+
 	"github.com/bwmarrin/discordgo"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -431,6 +432,18 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 		}
 		log.Printf("Matched !a_reset_case_limits")
 		rank.HandleResetCaseLimitsCommand(s, m)
+	case command == "!btc":
+		log.Printf("Matched !btc")
+		rank.HandleBitcoinPriceCommand(s, m)
+	case command == "!prices":
+		log.Printf("Matched !prices")
+		rank.HandlePriceStatsCommand(s, m)
+	case command == "!a_refresh_bank":
+		if !rank.IsAdmin(m.Author.ID) {
+			return
+		}
+		log.Printf("Matched !a_refresh_bank")
+		rank.HandleAdminRefreshBankCommand(s, m)
 	default:
 		log.Printf("No match for command: %s", command)
 	}
