@@ -168,9 +168,6 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string
 	// Загрузка cinema options
 	r.LoadCinemaOptions()
 
-	// Инициализация банка кейсов
-	r.initializeCaseBank()
-
 	// Инициализация KKI
 	r.Kki, err = NewKKI(r.ctx)
 	if err != nil {
@@ -181,6 +178,10 @@ func NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID string
 	}
 
 	log.Printf("Инициализирован рейтинг с %d администраторами", len(r.admins))
+
+	// Инициализация банка кейсов
+	r.initializeCaseBank()
+
 	return r, nil
 }
 
