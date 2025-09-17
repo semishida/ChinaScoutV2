@@ -3,11 +3,12 @@ package ranking
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/redis/go-redis/v9"
 	"log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -517,6 +518,7 @@ func (r *Ranking) HandleChelpCommand(s *discordgo.Session, m *discordgo.MessageC
 			{Name: "📋 !admincinemalist", Value: "Детальный список вариантов (админы).", Inline: false},
 			{Name: "🗑️ !removelowest <число>", Value: "Удалить <число> самых низких вариантов (админы).", Inline: false},
 			{Name: "⚙️ !adjustcinema <номер> <+/-сумма>", Value: "Корректировать сумму любого кино-варианта (админы).", Inline: false},
+			{Name: "🗑️ !removecinema @id <номер>", Value: "Удалить вариант, предложенный пользователем (админы).", Inline: false},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "Славь Императора и собирай кредиты! 👑 | Бот создан для веселья и рейтингов",
