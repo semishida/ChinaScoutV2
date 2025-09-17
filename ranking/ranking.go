@@ -47,13 +47,13 @@ type BitcoinTracker struct {
 
 // RarityVolatility определяет волатильность цены для каждой редкости
 var RarityVolatility = map[string]float64{
-	"Common":     0.1, // ±10%
-	"Rare":       0.3, // ±30%
-	"Super-rare": 0.6, // ±60%
-	"Epic":       1.0, // ±100%
-	"Nephrite":   1.5, // ±150%
-	"Exotic":     2.0, // ±200%
-	"Legendary":  3.0, // ±300%
+	"Common":     0.5,  // ±50% - было 0.1 (10%)
+	"Rare":       1.0,  // ±100% - было 0.3 (30%)
+	"Super-rare": 2.0,  // ±200% - было 0.6 (60%)
+	"Epic":       4.0,  // ±400% - было 1.0 (100%)
+	"Nephrite":   6.0,  // ±600% - было 1.5 (150%)
+	"Exotic":     8.0,  // ±800% - было 2.0 (200%)
+	"Legendary":  10.0, // ±1000% - было 3.0 (300%)
 }
 
 // BaseRarityPrices базовые цены в USD для каждой редкости
@@ -1610,22 +1610,34 @@ func (bt *BitcoinTracker) CalculateVolatility() float64 {
 	defer bt.mu.Unlock()
 
 	if len(bt.PriceHistory) < 2 {
-		return 0.1
+		return 0.2 // Базовая волатильность 20% если данных мало
 	}
 
-	min := bt.PriceHistory[0]
-	max := bt.PriceHistory[0]
-
-	for _, price := range bt.PriceHistory {
-		if price < min {
-			min = price
-		}
-		if price > max {
-			max = price
-		}
+	// Берем последние 12 значений (1 час при обновлении каждые 5 минут)
+	recentPrices := bt.PriceHistory
+	if len(recentPrices) > 12 {
+		recentPrices = recentPrices[len(recentPrices)-12:]
 	}
 
-	return (max - min) / ((max + min) / 2)
+	// Вычисляем стандартное отклонение для более точной волатильности
+	sum := 0.0
+	for _, price := range recentPrices {
+		sum += price
+	}
+	mean := sum / float64(len(recentPrices))
+
+	variance := 0.0
+	for _, price := range recentPrices {
+		variance += math.Pow(price-mean, 2)
+	}
+	variance /= float64(len(recentPrices))
+	stdDev := math.Sqrt(variance)
+
+	// Волатильность как коэффициент вариации
+	volatility := stdDev / mean
+
+	// Увеличиваем воспринимаемую волатильность в 2 раза
+	return math.Min(1.0, volatility*2.0)
 }
 
 // CalculateNFTPrice вычисляет текущую цену NFT
@@ -1644,12 +1656,26 @@ func (r *Ranking) CalculateNFTPrice(nft NFT) int {
 	basePrice := nft.BasePriceUSD
 	rarityVolatility := RarityVolatility[nft.Rarity]
 
-	// Для Common и Rare - фиксированная цена
-	if rarityVolatility <= 0.3 {
-		return int(basePrice)
+	// Для Common - меньшая волатильность
+	if nft.Rarity == "Common" {
+		// Common все еще более стабильны, но не полностью фиксированы
+		btcVolatility := r.BitcoinTracker.CalculateVolatility()
+		currentBtcPrice := r.BitcoinTracker.CurrentPrice
+		averageBtcPrice := r.BitcoinTracker.Get24hAverage()
+
+		btcDeviation := (currentBtcPrice - averageBtcPrice) / averageBtcPrice
+		// Меньшее влияние на Common
+		impactStrength := btcVolatility * rarityVolatility * 0.3
+
+		volatilityMultiplier := 1.0 + (btcDeviation * impactStrength)
+		// Ограничиваем разброс для Common
+		volatilityMultiplier = math.Max(0.8, math.Min(1.2, volatilityMultiplier))
+
+		finalPrice := basePrice * volatilityMultiplier
+		return int(finalPrice)
 	}
 
-	// Для редких NFT - динамическая цена
+	// Для Rare и выше - полная волатильность
 	btcVolatility := r.BitcoinTracker.CalculateVolatility()
 	currentBtcPrice := r.BitcoinTracker.CurrentPrice
 	averageBtcPrice := r.BitcoinTracker.Get24hAverage()
@@ -1658,15 +1684,40 @@ func (r *Ranking) CalculateNFTPrice(nft NFT) int {
 	btcDeviation := (currentBtcPrice - averageBtcPrice) / averageBtcPrice
 
 	// Сила воздействия = волатильность BTC * множитель редкости
-	impactStrength := btcVolatility * rarityVolatility
+	// Увеличиваем влияние в 3 раза для больших колебаний
+	impactStrength := btcVolatility * rarityVolatility * 3.0
 
 	// Применяем воздействие
 	volatilityMultiplier := 1.0 + (btcDeviation * impactStrength)
 
+	// Увеличиваем максимальный разброс для редких NFT
+	var minMultiplier, maxMultiplier float64
+
+	switch nft.Rarity {
+	case "Rare":
+		minMultiplier, maxMultiplier = 0.7, 1.5
+	case "Super-rare":
+		minMultiplier, maxMultiplier = 0.6, 2.0
+	case "Epic":
+		minMultiplier, maxMultiplier = 0.5, 3.0
+	case "Nephrite":
+		minMultiplier, maxMultiplier = 0.4, 4.0
+	case "Exotic":
+		minMultiplier, maxMultiplier = 0.3, 5.0
+	case "Legendary":
+		minMultiplier, maxMultiplier = 0.2, 6.0 // Легендарки могут упасть до 20% или вырасти в 6 раз
+	default:
+		minMultiplier, maxMultiplier = 0.1, 10.0
+	}
+
 	// Ограничиваем разброс
-	volatilityMultiplier = math.Max(0.1, math.Min(10.0, volatilityMultiplier))
+	volatilityMultiplier = math.Max(minMultiplier, math.Min(maxMultiplier, volatilityMultiplier))
 
 	finalPrice := basePrice * volatilityMultiplier
+
+	log.Printf("Цена %s: база $%.0f, множитель %.2f, итого $%.0f (BTC отклонение: %.1f%%)",
+		nft.Rarity, basePrice, volatilityMultiplier, finalPrice, btcDeviation*100)
+
 	return int(finalPrice)
 }
 
