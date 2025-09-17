@@ -342,6 +342,9 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 		rank.HandleChinaCommand(s, m)
 	case strings.HasPrefix(command, "!transfer"):
 		log.Printf("Matched !transfer")
+	case strings.HasPrefix(command, "!removecinema "):
+		log.Printf("Matched !removecinema")
+		rank.HandleRemoveCinemaCommand(s, m, command)
 		rank.HandleTransferCommand(s, m, m.Content)
 	case strings.HasPrefix(command, "!sync_nfts"):
 		if !rank.IsAdmin(m.Author.ID) {

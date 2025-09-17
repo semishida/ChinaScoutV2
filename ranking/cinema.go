@@ -1388,3 +1388,132 @@ func splitLongMessage(message string, maxLength int) ([]string, error) {
 	log.Printf("Сообщение разбито на %d частей", len(parts))
 	return parts, nil
 }
+
+func (r *Ranking) HandleRemoveCinemaCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
+	log.Printf("Начало обработки !removecinema: %s от %s", command, m.Author.ID)
+
+	if !r.IsAdmin(m.Author.ID) {
+		log.Printf("Пользователь %s не админ", m.Author.ID)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Только админы могут удалять фильмы",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !removecinema: %v", err)
+		}
+		return
+	}
+
+	args := strings.Fields(command)
+	if len(args) != 2 {
+		log.Printf("Неверный формат команды: %s", command)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Неверный формат команды",
+			Color:       0xFF0000,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Использование", Value: "`!removecinema <номер>`\nПример: `!removecinema 1`", Inline: false},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !removecinema: %v", err)
+		}
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Создаем отсортированную копию для определения правильного индекса
+	sortedOptions := make([]CinemaOption, len(r.cinemaOptions))
+	copy(sortedOptions, r.cinemaOptions)
+	sort.Slice(sortedOptions, func(i, j int) bool {
+		return sortedOptions[i].Total > sortedOptions[j].Total
+	})
+
+	index, err := strconv.Atoi(args[1])
+	if err != nil || index < 1 || index > len(sortedOptions) {
+		log.Printf("Неверный номер варианта: %s, доступно: %d фильмов", args[1], len(sortedOptions))
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: fmt.Sprintf("❌ Неверный номер варианта (доступно: 1-%d)", len(sortedOptions)),
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !removecinema: %v", err)
+		}
+		return
+	}
+
+	// Находим соответствующий фильм в оригинальном массиве
+	filmToRemove := sortedOptions[index-1]
+	var originalIndex int = -1
+	for i, option := range r.cinemaOptions {
+		if option.Name == filmToRemove.Name && option.Total == filmToRemove.Total {
+			originalIndex = i
+			break
+		}
+	}
+
+	if originalIndex == -1 {
+		log.Printf("Не удалось найти фильм в оригинальном массиве: %s", filmToRemove.Name)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка: не удалось найти фильм для удаления",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения для !removecinema: %v", err)
+		}
+		return
+	}
+
+	// Удаляем фильм без возврата кредитов
+	removedFilm := r.cinemaOptions[originalIndex]
+	r.cinemaOptions = append(r.cinemaOptions[:originalIndex], r.cinemaOptions[originalIndex+1:]...)
+
+	if err := r.SaveCinemaOptions(); err != nil {
+		log.Printf("Ошибка сохранения cinemaOptions: %v", err)
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎥 Киноаукцион",
+			Description: "❌ Ошибка при сохранении данных аукциона",
+			Color:       0xFF0000,
+			Footer:      &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+			Timestamp:   time.Now().Format(time.RFC3339),
+		}
+		if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+			log.Printf("Ошибка отправки сообщения об ошибке для !removecinema: %v", err)
+		}
+		return
+	}
+
+	log.Printf("Фильм удален: %s (был на позиции #%d)", removedFilm.Name, index)
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎥 Киноаукцион",
+		Description: fmt.Sprintf("🗑️ Фильм #%d удален без возврата кредитов", index),
+		Color:       randomColor(),
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Фильм", Value: removedFilm.Name, Inline: true},
+			{Name: "Бывшая сумма", Value: fmt.Sprintf("%d кредитов", removedFilm.Total), Inline: true},
+			{Name: "Действие", Value: "Кредиты не возвращены (фильм просмотрен)", Inline: false},
+		},
+		Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	if _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+		log.Printf("Ошибка отправки сообщения для !removecinema: %v", err)
+	} else {
+		log.Printf("Сообщение об успешном удалении отправлено")
+	}
+	log.Printf("Завершение обработки !removecinema")
+}
