@@ -47,13 +47,13 @@ type BitcoinTracker struct {
 
 // RarityVolatility определяет волатильность цены для каждой редкости
 var RarityVolatility = map[string]float64{
-	"Common":     0.5,  // ±50% - было 0.1 (10%)
-	"Rare":       1.0,  // ±100% - было 0.3 (30%)
-	"Super-rare": 2.0,  // ±200% - было 0.6 (60%)
-	"Epic":       4.0,  // ±400% - было 1.0 (100%)
-	"Nephrite":   6.0,  // ±600% - было 1.5 (150%)
-	"Exotic":     8.0,  // ±800% - было 2.0 (200%)
-	"Legendary":  10.0, // ±1000% - было 3.0 (300%)
+	"Common":     10.0,  // ±50% - было 0.1 (10%)
+	"Rare":       100.0, // ±100% - было 0.3 (30%)
+	"Super-rare": 200.0, // ±200% - было 0.6 (60%)
+	"Epic":       400.0, // ±400% - было 1.0 (100%)
+	"Nephrite":   600.0, // ±600% - было 1.5 (150%)
+	"Exotic":     800.0, // ±800% - было 2.0 (200%)
+	"Legendary":  10.0,  // ±1000% - было 3.0 (300%)
 }
 
 // BaseRarityPrices базовые цены в USD для каждой редкости
@@ -1685,7 +1685,7 @@ func (r *Ranking) CalculateNFTPrice(nft NFT) int {
 
 	// Сила воздействия = волатильность BTC * множитель редкости
 	// Увеличиваем влияние в 3 раза для больших колебаний
-	impactStrength := btcVolatility * rarityVolatility * 3.0
+	impactStrength := btcVolatility * rarityVolatility * 30.0
 
 	// Применяем воздействие
 	volatilityMultiplier := 1.0 + (btcDeviation * impactStrength)
@@ -1699,15 +1699,15 @@ func (r *Ranking) CalculateNFTPrice(nft NFT) int {
 	case "Super-rare":
 		minMultiplier, maxMultiplier = 0.6, 2.0
 	case "Epic":
-		minMultiplier, maxMultiplier = 0.5, 3.0
+		minMultiplier, maxMultiplier = 0.5, 30.0
 	case "Nephrite":
-		minMultiplier, maxMultiplier = 0.4, 4.0
+		minMultiplier, maxMultiplier = 0.4, 40.0
 	case "Exotic":
-		minMultiplier, maxMultiplier = 0.3, 5.0
+		minMultiplier, maxMultiplier = 0.3, 50.0
 	case "Legendary":
-		minMultiplier, maxMultiplier = 0.2, 6.0 // Легендарки могут упасть до 20% или вырасти в 6 раз
+		minMultiplier, maxMultiplier = 0.2, 60.0 // Легендарки могут упасть до 20% или вырасти в 6 раз
 	default:
-		minMultiplier, maxMultiplier = 0.1, 10.0
+		minMultiplier, maxMultiplier = 0.1, 100.0
 	}
 
 	// Ограничиваем разброс
