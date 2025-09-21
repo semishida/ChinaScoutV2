@@ -857,9 +857,29 @@ func HandleAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, ra
 
 // buildCommandString строит строку команды из опций для совместимости
 func buildCommandString(commandName string, options []*discordgo.ApplicationCommandInteractionDataOption) string {
-	// Убираем префикс admin_ для совместимости с существующими обработчиками
+	// Маппинг slash-команд на ожидаемые обработчиками команды
+	commandMap := map[string]string{
+		"admin_mass":             "adminmass",
+		"admin_give_case":        "a_give_case",
+		"admin_give_nft":         "a_give_nft",
+		"admin_remove_nft":       "a_remove_nft",
+		"admin_refresh_bank":     "a_refresh_bank",
+		"admin_reset_limits":     "a_reset_case_limits",
+		"admin_cinema_list":      "admincinemalist",
+		"admin_adjust_cinema":    "adjustcinema",
+		"admin_remove_lowest":    "removelowest",
+		"admin_remove_cinema":    "removecinema",
+		"admin_end_blackjack":    "endblackjack",
+		"admin_close_dep":        "closedep",
+		"admin_holiday_case":     "a_holiday_case",
+		"admin_holiday_case_all": "a_give_holiday_case_all",
+	}
+
+	// Получаем правильное название команды
 	cleanCommandName := commandName
-	if strings.HasPrefix(commandName, "admin_") {
+	if mappedName, exists := commandMap[commandName]; exists {
+		cleanCommandName = mappedName
+	} else if strings.HasPrefix(commandName, "admin_") {
 		cleanCommandName = strings.TrimPrefix(commandName, "admin_")
 	}
 
