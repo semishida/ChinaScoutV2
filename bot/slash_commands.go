@@ -664,6 +664,8 @@ func HandleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, ra
 	commandName := i.ApplicationCommandData().Name
 	options := i.ApplicationCommandData().Options
 
+	log.Printf("HandleSlashCommand: processing command '%s' with %d options", commandName, len(options))
+
 	// Создаем мок MessageCreate для совместимости с существующими обработчиками
 	mockMessage := &discordgo.MessageCreate{
 		Message: &discordgo.Message{
@@ -794,10 +796,11 @@ func HandleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, ra
 	case "admin_close_dep":
 		rank.HandleCloseDepCommand(s, mockMessage, buildCommandString(commandName, options))
 	default:
+		log.Printf("HandleSlashCommand: unknown command '%s'", commandName)
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Неизвестная команда!",
+				Content: "❌ Неизвестная команда: " + commandName,
 			},
 		})
 	}

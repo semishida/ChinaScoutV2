@@ -45,10 +45,10 @@ func (r *Ranking) HandleChinaCommand(s *discordgo.Session, m *discordgo.MessageC
 // HandleChinaSlashCommand обрабатывает slash команду china
 func (r *Ranking) HandleChinaSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	log.Printf("Обработка /china от %s", i.Member.User.ID)
-
+	
 	userID := i.Member.User.ID
 	username := i.Member.User.Username
-
+	
 	// Проверяем, есть ли опция user
 	options := i.ApplicationCommandData().Options
 	for _, opt := range options {
@@ -61,13 +61,19 @@ func (r *Ranking) HandleChinaSlashCommand(s *discordgo.Session, i *discordgo.Int
 
 	userRating := r.GetRating(userID)
 	response := fmt.Sprintf("💰 %s, баланс: **%d** соцкредитов! 🇨🇳", username, userRating)
-
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	
+	log.Printf("HandleChinaSlashCommand: sending response: %s", response)
+	
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Content: response,
 		},
 	})
+	
+	if err != nil {
+		log.Printf("HandleChinaSlashCommand: error responding: %v", err)
+	}
 }
 
 // isValidUserID проверяет, является ли строка валидным ID пользователя.
@@ -154,29 +160,39 @@ func (r *Ranking) HandleTopCommand(s *discordgo.Session, m *discordgo.MessageCre
 // HandleTopSlashCommand обрабатывает slash команду top
 func (r *Ranking) HandleTopSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	log.Printf("Обработка /top от %s", i.Member.User.ID)
-
+	
 	topUsers := r.GetTop5()
 	if len(topUsers) == 0 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		log.Printf("HandleTopSlashCommand: no top users found")
+		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Content: "🏆 Пока нет лидеров! Будь первым! 😎",
 			},
 		})
+		if err != nil {
+			log.Printf("HandleTopSlashCommand: error responding (no users): %v", err)
+		}
 		return
 	}
 
 	response := "🏆 **Топ-5 пользователей:**\n"
-	for i, user := range topUsers {
-		response += fmt.Sprintf("%d. <@%s> — %d кредитов\n", i+1, user.ID, user.Rating)
+	for idx, user := range topUsers {
+		response += fmt.Sprintf("%d. <@%s> — %d кредитов\n", idx+1, user.ID, user.Rating)
 	}
-
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	
+	log.Printf("HandleTopSlashCommand: sending response with %d users", len(topUsers))
+	
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Content: response,
 		},
 	})
+	
+	if err != nil {
+		log.Printf("HandleTopSlashCommand: error responding: %v", err)
+	}
 }
 
 // getUsername получает имя пользователя по ID.
@@ -621,11 +637,17 @@ func (r *Ranking) HandleHelpSlashCommand(s *discordgo.Session, i *discordgo.Inte
 		},
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
-
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	
+	log.Printf("HandleHelpSlashCommand: sending help embed")
+	
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{embed},
 		},
 	})
+	
+	if err != nil {
+		log.Printf("HandleHelpSlashCommand: error responding: %v", err)
+	}
 }
