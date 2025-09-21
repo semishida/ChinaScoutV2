@@ -678,82 +678,89 @@ func HandleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, ra
 		},
 	}
 
-	// Обрабатываем команду
+	// Обрабатываем команду точно как в оригинальном handleCommands
 	switch commandName {
-	case "china":
-		rank.HandleChinaSlashCommand(s, i)
+	case "cpoll":
+		log.Printf("Matched !cpoll")
+		rank.HandlePollCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "dep":
+		log.Printf("Matched !dep")
+		rank.HandleDepCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "admin_close_dep":
+		log.Printf("Matched !closedep")
+		rank.HandleCloseDepCommand(s, mockMessage, buildCommandString(commandName, options))
 	case "top":
+		log.Printf("Matched !top")
 		rank.HandleTopSlashCommand(s, i)
-	case "stats":
-		rank.HandleStatsCommand(s, mockMessage)
-	case "transfer":
-		rank.HandleTransferCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "help":
-		rank.HandleHelpSlashCommand(s, i)
+	case "polls":
+		log.Printf("Matched !polls")
+		rank.HandlePollsCommand(s, mockMessage)
 	case "rb":
 		if len(options) > 0 {
+			log.Printf("Matched !rb with arguments, calling HandleRBCommand")
 			rank.HandleRBCommand(s, mockMessage, buildCommandString(commandName, options))
 		} else {
+			log.Printf("Matched !rb, calling StartRBGame")
 			rank.StartRBGame(s, mockMessage)
 		}
 	case "blackjack":
 		if len(options) > 0 {
+			log.Printf("Matched !blackjack with arguments")
 			rank.HandleBlackjackBet(s, mockMessage, buildCommandString(commandName, options))
 		} else {
+			log.Printf("Matched !blackjack")
 			rank.StartBlackjackGame(s, mockMessage)
 		}
+	case "admin_end_blackjack":
+		log.Printf("Matched !endblackjack")
+		rank.HandleEndBlackjackCommand(s, mockMessage, buildCommandString(commandName, options))
 	case "duel":
+		log.Printf("Matched !duel")
 		rank.HandleDuelCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "inventory":
-		rank.HandleInventoryCommand(s, mockMessage)
-	case "case_inventory":
-		rank.HandleCaseInventoryCommand(s, mockMessage)
-	case "case_bank":
-		rank.HandleCaseBankCommand(s, mockMessage)
-	case "daily_case":
-		rank.HandleDailyCaseCommand(s, mockMessage)
-	case "open_case":
-		rank.HandleOpenCaseCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "sell":
-		rank.HandleSellCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "trade_nft":
-		rank.HandleTradeNFTCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "show_nft":
-		rank.HandleShowNFTCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "buy_case_bank":
-		rank.HandleBuyCaseBankCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "case_trade":
-		rank.HandleCaseTradeCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "btc":
-		rank.HandleBitcoinPriceCommand(s, mockMessage)
-	case "prices":
-		rank.HandlePriceStatsCommand(s, mockMessage)
-	case "polls":
-		rank.HandlePollsCommand(s, mockMessage)
-	case "cpoll":
-		rank.HandlePollCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "dep":
-		rank.HandleDepCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "cinema":
-		rank.HandleCinemaCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "cinema_list":
-		rank.HandleCinemaListCommand(s, mockMessage)
-	case "bet_cinema":
-		rank.HandleBetCinemaCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "admin":
-		rank.HandleAdminCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "stats":
+		log.Printf("Matched !stats")
+		rank.HandleStatsCommand(s, mockMessage)
 	case "admin_mass":
+		log.Printf("Matched !adminmass")
 		rank.HandleAdminMassCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "admin_cinema_list":
+		log.Printf("Matched !admincinemalist")
+		rank.HandleAdminCinemaListCommand(s, mockMessage)
+	case "admin_remove_lowest":
+		log.Printf("Matched !removelowest")
+		rank.HandleRemoveLowestCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "admin_adjust_cinema":
+		log.Printf("Matched !adjustcinema")
+		rank.HandleAdjustCinemaCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "cinema":
+		log.Printf("Matched !cinema")
+		rank.HandleCinemaCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "bet_cinema":
+		log.Printf("Matched !betcinema")
+		rank.HandleBetCinemaCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "cinema_list":
+		log.Printf("Matched !cinemalist")
+		rank.HandleCinemaListCommand(s, mockMessage)
+	case "admin":
+		log.Printf("Matched !admin")
+		rank.HandleAdminCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "help":
+		log.Printf("Matched !chelp")
+		rank.HandleHelpSlashCommand(s, i)
+	case "china":
+		log.Printf("Matched !china")
+		rank.HandleChinaSlashCommand(s, i)
+	case "transfer":
+		log.Printf("Matched !transfer")
+		rank.HandleTransferCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "admin_remove_cinema":
+		log.Printf("Matched !removecinema")
+		rank.HandleRemoveCinemaCommand(s, mockMessage, buildCommandString(commandName, options))
 	case "sync_nfts":
 		if !rank.IsAdmin(i.Member.User.ID) {
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: "❌ Только админы могут использовать эту команду!",
-				},
-			})
 			return
 		}
+		log.Printf("Matched !sync_nfts")
 		err := rank.Kki.SyncFromSheets(rank)
 		if err != nil {
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -770,40 +777,86 @@ func HandleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate, ra
 				},
 			})
 		}
+	case "inventory":
+		log.Printf("Matched !inventory")
+		rank.HandleInventoryCommand(s, mockMessage)
+	case "case_inventory":
+		log.Printf("Matched !case_inventory")
+		rank.HandleCaseInventoryCommand(s, mockMessage)
+	case "sell":
+		log.Printf("Matched !sell")
+		rank.HandleSellCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "trade_nft":
+		log.Printf("Matched !trade_nft")
+		rank.HandleTradeNFTCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "open_case":
+		log.Printf("Matched !open_case")
+		rank.HandleOpenCaseCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "daily_case":
+		log.Printf("Matched !daily_case")
+		rank.HandleDailyCaseCommand(s, mockMessage)
+	case "case_trade":
+		log.Printf("Matched !case_trade")
+		rank.HandleCaseTradeCommand(s, mockMessage, buildCommandString(commandName, options))
 	case "admin_give_case":
+		if !rank.IsAdmin(i.Member.User.ID) {
+			return
+		}
+		log.Printf("Matched !a_give_case")
 		rank.HandleAdminGiveCase(s, mockMessage, buildCommandString(commandName, options))
 	case "admin_give_nft":
+		if !rank.IsAdmin(i.Member.User.ID) {
+			return
+		}
+		log.Printf("Matched !a_give_nft")
 		rank.HandleAdminGiveNFT(s, mockMessage, buildCommandString(commandName, options))
 	case "admin_remove_nft":
+		if !rank.IsAdmin(i.Member.User.ID) {
+			return
+		}
+		log.Printf("Matched !a_remove_nft")
 		rank.HandleAdminRemoveNFT(s, mockMessage, buildCommandString(commandName, options))
-	case "admin_refresh_bank":
-		rank.HandleAdminRefreshBankCommand(s, mockMessage)
-	case "admin_reset_limits":
-		rank.HandleResetCaseLimitsCommand(s, mockMessage)
-	case "admin_cinema_list":
-		rank.HandleAdminCinemaListCommand(s, mockMessage)
-	case "admin_remove_lowest":
-		rank.HandleRemoveLowestCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "admin_adjust_cinema":
-		rank.HandleAdjustCinemaCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "admin_remove_cinema":
-		rank.HandleRemoveCinemaCommand(s, mockMessage, buildCommandString(commandName, options))
-	case "admin_end_blackjack":
-		rank.HandleEndBlackjackCommand(s, mockMessage, buildCommandString(commandName, options))
 	case "admin_holiday_case":
+		if !rank.IsAdmin(i.Member.User.ID) {
+			return
+		}
+		log.Printf("Matched !a_holiday_case")
 		rank.HandleAdminHolidayCase(s, mockMessage, buildCommandString(commandName, options))
 	case "admin_holiday_case_all":
+		if !rank.IsAdmin(i.Member.User.ID) {
+			return
+		}
+		log.Printf("Matched !a_give_holiday_case_all")
 		rank.HandleAdminGiveHolidayCaseAll(s, mockMessage, buildCommandString(commandName, options))
-	case "admin_close_dep":
-		rank.HandleCloseDepCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "show_nft":
+		log.Printf("Matched !show_nft")
+		rank.HandleShowNFTCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "case_bank":
+		log.Printf("Matched !case_bank")
+		rank.HandleCaseBankCommand(s, mockMessage)
+	case "buy_case_bank":
+		log.Printf("Matched !buy_case_bank")
+		rank.HandleBuyCaseBankCommand(s, mockMessage, buildCommandString(commandName, options))
+	case "admin_reset_limits":
+		if !rank.IsAdmin(i.Member.User.ID) {
+			return
+		}
+		log.Printf("Matched !a_reset_case_limits")
+		rank.HandleResetCaseLimitsCommand(s, mockMessage)
+	case "btc":
+		log.Printf("Matched !btc")
+		rank.HandleBitcoinPriceCommand(s, mockMessage)
+	case "prices":
+		log.Printf("Matched !prices")
+		rank.HandlePriceStatsCommand(s, mockMessage)
+	case "admin_refresh_bank":
+		if !rank.IsAdmin(i.Member.User.ID) {
+			return
+		}
+		log.Printf("Matched !a_refresh_bank")
+		rank.HandleAdminRefreshBankCommand(s, mockMessage)
 	default:
-		log.Printf("HandleSlashCommand: unknown command '%s'", commandName)
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Неизвестная команда: " + commandName,
-			},
-		})
+		log.Printf("No match for command: %s", commandName)
 	}
 }
 
