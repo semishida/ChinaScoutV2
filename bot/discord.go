@@ -17,10 +17,11 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 		log.Fatalf("Failed to initialize Discord bot: %v", err)
 	}
 
-	dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentMessageContent | discordgo.IntentsGuildVoiceStates
+	dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentMessageContent | discordgo.IntentsGuildVoiceStates | discordgo.IntentsGuilds
 
 	// Регистрируем обработчик голосовой активности
 	dg.AddHandler(rank.TrackVoiceActivity)
+	log.Printf("Registered voice activity handler")
 
 	for i := 0; i < 5; i++ {
 		err = dg.Open()

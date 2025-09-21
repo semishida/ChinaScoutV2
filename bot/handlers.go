@@ -83,6 +83,7 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 	})
 
 	// Обработчик взаимодействий (кнопки и slash commands)
+	log.Printf("Registering interaction handler")
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		log.Printf("Interaction received: type=%v, user=%s", i.Type, i.Member.User.ID)
 
@@ -95,6 +96,16 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 		case discordgo.InteractionApplicationCommand:
 			// Обработка slash commands
 			log.Printf("Slash command received: %s from %s", i.ApplicationCommandData().Name, i.Member.User.ID)
+
+			// Простой тест - отвечаем на любую команду
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "✅ Тест: команда получена!",
+				},
+			})
+			return
+
 			HandleSlashCommand(s, i, rank)
 		case discordgo.InteractionApplicationCommandAutocomplete:
 			// Обработка автодополнения
