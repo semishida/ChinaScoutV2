@@ -82,75 +82,7 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 		}
 	})
 
-	// Обработчик взаимодействий (кнопки и slash commands)
-	log.Printf("Registering interaction handler")
-	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		log.Printf("Interaction received: type=%v, user=%s", i.Type, i.Member.User.ID)
-
-		if i.Member.User.ID == s.State.User.ID {
-			log.Printf("Ignoring interaction from bot itself")
-			return
-		}
-
-		switch i.Type {
-		case discordgo.InteractionApplicationCommand:
-			// Обработка slash commands
-			log.Printf("Slash command received: %s from %s", i.ApplicationCommandData().Name, i.Member.User.ID)
-
-			// Простой тест - отвечаем на любую команду
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: "✅ Тест: команда получена!",
-				},
-			})
-			return
-
-			HandleSlashCommand(s, i, rank)
-		case discordgo.InteractionApplicationCommandAutocomplete:
-			// Обработка автодополнения
-			log.Printf("Autocomplete request for: %s from %s", i.ApplicationCommandData().Name, i.Member.User.ID)
-			HandleAutocomplete(s, i, rank)
-		case discordgo.InteractionMessageComponent:
-			// Обработка кнопок
-			customID := i.MessageComponentData().CustomID
-			log.Printf("Interaction received, CustomID: %s, ChannelID: %s, UserID: %s", customID, i.ChannelID, i.Member.User.ID)
-			switch {
-			case strings.HasPrefix(customID, "sell_confirm_"):
-				log.Printf("Matched sell_confirm_")
-				rank.HandleSellConfirm(s, i)
-			case strings.HasPrefix(customID, "sell_cancel_"):
-				log.Printf("Matched sell_cancel_")
-				rank.HandleSellCancel(s, i)
-			case strings.HasPrefix(customID, "user_confirm_") || strings.HasPrefix(customID, "user_decline_") ||
-				strings.HasPrefix(customID, "admin_accept_") || strings.HasPrefix(customID, "admin_reject_"):
-				log.Printf("Matched cinema button: %s", customID)
-				rank.HandleCinemaButton(s, i)
-			case strings.HasPrefix(customID, "cinema_confirm_") || strings.HasPrefix(customID, "cinema_decline_"):
-				log.Printf("Matched cinema button: %s", customID)
-				rank.HandleCinemaButton(s, i)
-			case strings.HasPrefix(customID, "blackjack_hit_"):
-				log.Printf("Matched blackjack_hit_")
-				rank.HandleBlackjackHit(s, i)
-			case strings.HasPrefix(customID, "blackjack_stand_"):
-				log.Printf("Matched blackjack_stand_")
-				rank.HandleBlackjackStand(s, i)
-			case strings.HasPrefix(customID, "blackjack_replay_"):
-				log.Printf("Matched blackjack_replay_")
-				rank.HandleBlackjackReplay(s, i)
-			case strings.HasPrefix(customID, "rb_replay_"):
-				log.Printf("Matched rb_replay_, calling HandleRBReplay")
-				rank.HandleRBReplay(s, i)
-			case strings.HasPrefix(customID, "duel_accept_"):
-				log.Printf("Matched duel_accept_")
-				rank.HandleDuelAccept(s, i)
-			default:
-				log.Printf("No match for CustomID: %s", customID)
-			}
-		default:
-			log.Printf("Received unknown interaction type: %v", i.Type)
-		}
-	})
+	// Обработчик взаимодействий теперь регистрируется в SetupDiscord
 
 	go handleTelegramUpdates(tgBot, chatID, dg, relayChannelID)
 	select {}

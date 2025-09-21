@@ -23,6 +23,41 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 	dg.AddHandler(rank.TrackVoiceActivity)
 	log.Printf("Registered voice activity handler")
 
+	// Регистрируем обработчик взаимодействий (кнопки и slash commands)
+	log.Printf("Registering interaction handler")
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		log.Printf("Interaction received: type=%v, user=%s", i.Type, i.Member.User.ID)
+
+		if i.Member.User.ID == s.State.User.ID {
+			log.Printf("Ignoring interaction from bot itself")
+			return
+		}
+
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
+			// Обработка slash commands
+			log.Printf("Slash command received: %s from %s", i.ApplicationCommandData().Name, i.Member.User.ID)
+
+			// Простой тест - отвечаем на любую команду
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "✅ Тест: команда получена!",
+				},
+			})
+			return
+		case discordgo.InteractionApplicationCommandAutocomplete:
+			// Обработка автодополнения
+			log.Printf("Autocomplete request for: %s from %s", i.ApplicationCommandData().Name, i.Member.User.ID)
+		case discordgo.InteractionMessageComponent:
+			// Обработка кнопок
+			customID := i.MessageComponentData().CustomID
+			log.Printf("Button interaction received, CustomID: %s", customID)
+		default:
+			log.Printf("Received unknown interaction type: %v", i.Type)
+		}
+	})
+
 	for i := 0; i < 5; i++ {
 		err = dg.Open()
 		if err == nil {
