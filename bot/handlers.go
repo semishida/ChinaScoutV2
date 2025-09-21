@@ -84,7 +84,10 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 
 	// Обработчик взаимодействий (кнопки и slash commands)
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		log.Printf("Interaction received: type=%v, user=%s", i.Type, i.Member.User.ID)
+
 		if i.Member.User.ID == s.State.User.ID {
+			log.Printf("Ignoring interaction from bot itself")
 			return
 		}
 
