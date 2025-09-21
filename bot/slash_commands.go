@@ -3,6 +3,7 @@ package bot
 import (
 	"log"
 	"strconv"
+	"strings"
 
 	"csv2/ranking"
 
@@ -856,7 +857,13 @@ func HandleAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate, ra
 
 // buildCommandString строит строку команды из опций для совместимости
 func buildCommandString(commandName string, options []*discordgo.ApplicationCommandInteractionDataOption) string {
-	cmd := "!" + commandName
+	// Убираем префикс admin_ для совместимости с существующими обработчиками
+	cleanCommandName := commandName
+	if strings.HasPrefix(commandName, "admin_") {
+		cleanCommandName = strings.TrimPrefix(commandName, "admin_")
+	}
+
+	cmd := "!" + cleanCommandName
 
 	for _, opt := range options {
 		switch opt.Type {
