@@ -42,6 +42,34 @@ func (r *Ranking) HandleChinaCommand(s *discordgo.Session, m *discordgo.MessageC
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("💰 %s, баланс: **%d** соцкредитов! 🇨🇳", username, userRating))
 }
 
+// HandleChinaSlashCommand обрабатывает slash команду china
+func (r *Ranking) HandleChinaSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	log.Printf("Обработка /china от %s", i.Member.User.ID)
+
+	userID := i.Member.User.ID
+	username := i.Member.User.Username
+
+	// Проверяем, есть ли опция user
+	options := i.ApplicationCommandData().Options
+	for _, opt := range options {
+		if opt.Name == "user" {
+			userID = opt.UserValue(nil).ID
+			username = opt.UserValue(nil).Username
+			break
+		}
+	}
+
+	userRating := r.GetRating(userID)
+	response := fmt.Sprintf("💰 %s, баланс: **%d** соцкредитов! 🇨🇳", username, userRating)
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: response,
+		},
+	})
+}
+
 // isValidUserID проверяет, является ли строка валидным ID пользователя.
 func isValidUserID(id string) bool {
 	if len(id) < 17 || len(id) > 20 { // Discord ID обычно 17–20 цифр
@@ -121,6 +149,34 @@ func (r *Ranking) HandleTopCommand(s *discordgo.Session, m *discordgo.MessageCre
 		response += fmt.Sprintf("%d. <@%s> — %d кредитов\n", i+1, user.ID, user.Rating)
 	}
 	s.ChannelMessageSend(m.ChannelID, response)
+}
+
+// HandleTopSlashCommand обрабатывает slash команду top
+func (r *Ranking) HandleTopSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	log.Printf("Обработка /top от %s", i.Member.User.ID)
+
+	topUsers := r.GetTop5()
+	if len(topUsers) == 0 {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "🏆 Пока нет лидеров! Будь первым! 😎",
+			},
+		})
+		return
+	}
+
+	response := "🏆 **Топ-5 пользователей:**\n"
+	for i, user := range topUsers {
+		response += fmt.Sprintf("%d. <@%s> — %d кредитов\n", i+1, user.ID, user.Rating)
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: response,
+		},
+	})
 }
 
 // getUsername получает имя пользователя по ID.
@@ -526,4 +582,50 @@ func (r *Ranking) HandleChelpCommand(s *discordgo.Session, m *discordgo.MessageC
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+}
+
+// HandleHelpSlashCommand обрабатывает slash команду help
+func (r *Ranking) HandleHelpSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	log.Printf("Обработка /help от %s", i.Member.User.ID)
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "📜 Руководство по ChinaBot 🇨🇳",
+		Description: "Добро пожаловать в мир соцкредитов! Теперь используй slash commands! 🚀",
+		Color:       0xFFD700, // Золотой цвет
+		Thumbnail: &discordgo.MessageEmbedThumbnail{
+			URL: "https://i.imgur.com/your-bot-icon.png", // Замени на иконку бота
+		},
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "💰 /china [user]", Value: "Узнай свой баланс или баланс другого игрока.", Inline: false},
+			{Name: "🏆 /top", Value: "Посмотри топ-5 пользователей по кредитам.", Inline: false},
+			{Name: "📊 /stats [user]", Value: "Проверь свою статистику: кредиты, игры, время в голосовых каналах.", Inline: false},
+			{Name: "📜 /transfer user amount [reason]", Value: "Передать кредиты другому", Inline: false},
+			{Name: "🎰 /rb [color] [bet]", Value: "Игра Красный-Чёрный", Inline: false},
+			{Name: "♠️ /blackjack [bet]", Value: "Игра Блэкджек", Inline: false},
+			{Name: "⚔️ /duel user bet", Value: "Вызови пользователя на дуэль", Inline: false},
+			{Name: "🃏 /inventory", Value: "Показать инвентарь NFT", Inline: false},
+			{Name: "📦 /case_inventory", Value: "Показать инвентарь кейсов", Inline: false},
+			{Name: "🏦 /case_bank", Value: "Показать банк кейсов", Inline: false},
+			{Name: "🎁 /daily_case", Value: "Получить ежедневный кейс", Inline: false},
+			{Name: "🎰 /open_case case_id", Value: "Открыть кейс", Inline: false},
+			{Name: "💰 /sell nft_id count", Value: "Продать NFT", Inline: false},
+			{Name: "🔄 /trade_nft user nft_id count", Value: "Передать NFT другому", Inline: false},
+			{Name: "📈 /btc", Value: "Показать курс биткойна", Inline: false},
+			{Name: "📊 /prices", Value: "Показать статистику цен NFT", Inline: false},
+			{Name: "📋 /polls", Value: "Посмотреть активные опросы", Inline: false},
+			{Name: "🎥 /cinema title amount", Value: "Предложить вариант для киноаукциона", Inline: false},
+			{Name: "📋 /cinema_list", Value: "Посмотреть варианты киноаукциона", Inline: false},
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Славь Императора и собирай кредиты! 👑 | Теперь с slash commands!",
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
 }

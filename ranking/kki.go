@@ -84,6 +84,32 @@ type KKI struct {
 	mu     sync.Mutex
 }
 
+// GetNFTs возвращает копию карты NFT для автодополнения
+func (k *KKI) GetNFTs() map[string]NFT {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	// Создаем копию карты
+	nftsCopy := make(map[string]NFT)
+	for k, v := range k.nfts {
+		nftsCopy[k] = v
+	}
+	return nftsCopy
+}
+
+// GetCases возвращает копию карты кейсов для автодополнения
+func (k *KKI) GetCases() map[string]Case {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	// Создаем копию карты
+	casesCopy := make(map[string]Case)
+	for k, v := range k.cases {
+		casesCopy[k] = v
+	}
+	return casesCopy
+}
+
 // NewKKI инициализирует KKI с подключением к Google Sheets и Redis
 func NewKKI(ctx context.Context) (*KKI, error) {
 	sheetID := os.Getenv("GOOGLE_SHEETS_ID")

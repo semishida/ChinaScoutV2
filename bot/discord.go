@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"csv2/ranking"
+
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -31,6 +32,24 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 	}
 	if err != nil {
 		log.Fatalf("Failed to open Discord session after 5 attempts: %v", err)
+	}
+
+	// Получаем ID гильдии из floodChannelID
+	guildID := ""
+	if channel, err := dg.Channel(floodChannelID); err == nil {
+		guildID = channel.GuildID
+	}
+
+	// Регистрируем slash commands
+	if guildID != "" {
+		log.Printf("Registering slash commands for guild: %s", guildID)
+		if err := RegisterSlashCommands(dg, guildID, rank); err != nil {
+			log.Printf("Failed to register slash commands: %v", err)
+		} else {
+			log.Println("Slash commands registered successfully!")
+		}
+	} else {
+		log.Printf("Warning: Could not determine guild ID from channel %s", floodChannelID)
 	}
 
 	log.Println("Discord bot is running.")

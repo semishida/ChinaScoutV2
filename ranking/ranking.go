@@ -196,6 +196,19 @@ func (r *Ranking) IsAdmin(userID string) bool {
 	return isAdmin
 }
 
+// GetPolls возвращает копию карты опросов для автодополнения
+func (r *Ranking) GetPolls() map[string]*Poll {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Создаем копию карты
+	pollsCopy := make(map[string]*Poll)
+	for k, v := range r.polls {
+		pollsCopy[k] = v
+	}
+	return pollsCopy
+}
+
 // generateGameID создаёт уникальный ID для игры.
 func generateGameID(playerID string) string {
 	rand.Seed(time.Now().UnixNano())

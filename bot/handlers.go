@@ -82,12 +82,23 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 		}
 	})
 
-	// Обработчик взаимодействий (кнопок)
+	// Обработчик взаимодействий (кнопки и slash commands)
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Member.User.ID == s.State.User.ID {
 			return
 		}
-		if i.Type == discordgo.InteractionMessageComponent {
+
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
+			// Обработка slash commands
+			log.Printf("Slash command received: %s from %s", i.ApplicationCommandData().Name, i.Member.User.ID)
+			HandleSlashCommand(s, i, rank)
+		case discordgo.InteractionApplicationCommandAutocomplete:
+			// Обработка автодополнения
+			log.Printf("Autocomplete request for: %s from %s", i.ApplicationCommandData().Name, i.Member.User.ID)
+			HandleAutocomplete(s, i, rank)
+		case discordgo.InteractionMessageComponent:
+			// Обработка кнопок
 			customID := i.MessageComponentData().CustomID
 			log.Printf("Interaction received, CustomID: %s, ChannelID: %s, UserID: %s", customID, i.ChannelID, i.Member.User.ID)
 			switch {
@@ -122,8 +133,8 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 			default:
 				log.Printf("No match for CustomID: %s", customID)
 			}
-		} else {
-			log.Printf("Received non-component interaction: %v", i.Type)
+		default:
+			log.Printf("Received unknown interaction type: %v", i.Type)
 		}
 	})
 
