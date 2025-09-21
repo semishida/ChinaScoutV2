@@ -197,11 +197,21 @@ func (r *Ranking) HandleCinemaCommand(s *discordgo.Session, m *discordgo.Message
 		},
 	}
 
-	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
-		Embed:      embed,
-		Components: components,
-		Reference:  m.Reference(),
-	})
+	// Проверяем, является ли это slash-командой (mockMessage)
+	var msg *discordgo.Message
+	if m.ID == "" || m.ID == "0" {
+		// Это slash-команда, не используем Reference
+		msg, err = s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+			Embed:      embed,
+			Components: components,
+		})
+	} else {
+		// Это обычная команда, используем Reference
+		msg, err = s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+			Embed:      embed,
+			Components: components,
+		})
+	}
 	if err != nil {
 		log.Printf("Ошибка отправки сообщения юзеру: %v", err)
 		r.redis.Del(r.ctx, "pending_bid:"+bidID) // Удаляем ставку при ошибке
@@ -400,11 +410,21 @@ func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.Mess
 		},
 	}
 
-	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
-		Embed:      embed,
-		Components: components,
-		Reference:  m.Reference(),
-	})
+	// Проверяем, является ли это slash-командой (mockMessage)
+	var msg *discordgo.Message
+	if m.ID == "" || m.ID == "0" {
+		// Это slash-команда, не используем Reference
+		msg, err = s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+			Embed:      embed,
+			Components: components,
+		})
+	} else {
+		// Это обычная команда, используем Reference
+		msg, err = s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+			Embed:      embed,
+			Components: components,
+		})
+	}
 	if err != nil {
 		log.Printf("Ошибка отправки сообщения юзеру: %v", err)
 		r.redis.Del(r.ctx, "pending_bid:"+bidID)
