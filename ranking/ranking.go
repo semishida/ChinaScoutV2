@@ -299,8 +299,8 @@ func (r *Ranking) HandleSellCommand(s *discordgo.Session, m *discordgo.MessageCr
 		return
 	}
 
-	// Расчёт суммы
-	sellPrice := nft.Price / 2 * count
+	// Расчёт суммы - ТЕПЕРЬ ПОЛНАЯ ЦЕНА вместо /2
+	sellPrice := nft.Price * count // Убрали деление на 2
 
 	// Отправка сообщения с подтверждением
 	customID := fmt.Sprintf("sell_confirm_%s_%s_%d_%d", m.Author.ID, nftID, count, sellPrice)
@@ -399,12 +399,13 @@ func (r *Ranking) HandleSellConfirm(s *discordgo.Session, i *discordgo.Interacti
 	r.LogCreditOperation(s, fmt.Sprintf("🃏 **%s** продал %d x %s **%s** (ID: %s) за 💰 %d кредитов.", i.Member.User.Username, count, RarityEmojis[nft.Rarity], nft.Name, nftID, sellPrice))
 
 	// Обновление сообщения для удаления кнопок
+	// В HandleSellConfirm тоже обновляем описание
 	embed := &discordgo.MessageEmbed{
-		Title:       "🃏 **Продажа завершена** ══════",
-		Description: fmt.Sprintf("✅ **Продано** %d x %s **%s** (ID: %s) за 💰 %d кредитов!", count, RarityEmojis[nft.Rarity], nft.Name, nftID, sellPrice),
-		Color:       RarityColors[nft.Rarity],
-		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", i.Member.User.Username)},
-	}
+    Title:       "🃏 **Продажа завершена** ══════",
+    Description: fmt.Sprintf("✅ **Продано** %d x %s **%s** (ID: %s) за 💰 %d кредитов!", count, RarityEmojis[nft.Rarity], nft.Name, nftID, sellPrice),
+    Color:       RarityColors[nft.Rarity],
+    Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", i.Member.User.Username)},
+}
 	emptyComponents := []discordgo.MessageComponent{}
 	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    i.ChannelID,
