@@ -276,22 +276,6 @@ func handleTelegramUpdates(bot *tgbotapi.BotAPI, chatID int64, dg *discordgo.Ses
 	}
 }
 
-gopackage bot
-
-import (
-	"fmt"
-	"log"
-	"os"
-	"strings"
-	"time"
-
-	"csv2/ranking"
-	"csv2/utils"
-
-	"github.com/bwmarrin/discordgo"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-)
-
 // Start sets up the Discord and Telegram bots and starts the relay system.
 func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayChannelID string, rank *ranking.Ranking) {
 	dg := SetupDiscord(discordToken, floodChannelID, relayChannelID, rank)
