@@ -245,55 +245,102 @@ func (r *Ranking) SaveUserInventory(userID string, inv UserInventory) {
 }
 
 // HandleInventoryCommand отображает инвентарь пользователя
+gopackage ranking
+
+import (
+	"fmt"
+	"log"
+	"sort"
+	"strings"
+
+	"github.com/bwmarrin/discordgo"
+)
+
+// HandleInventoryCommand отображает инвентарь пользователя
 func (r *Ranking) HandleInventoryCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
-    log.Printf("Starting HandleInventoryCommand for user %s", m.Author.ID)
-    inv := r.GetUserInventory(m.Author.ID)
-    if len(inv) == 0 {
-        log.Printf("Inventory empty for user %s", m.Author.ID)
-        _, err := s.ChannelMessageSend(m.ChannelID, "🎒 **Ваш инвентарь пуст** ══════\nНичего нет, Император ждёт добычи! 😢")
-        if err != nil {
-            log.Printf("Error sending empty inventory message: %v", err)
-        }
-        return
-    }
+	log.Printf("Starting HandleInventoryCommand for user %s", m.Author.ID)
+	inv := r.GetUserInventory(m.Author.ID)
+	if len(inv) == 0 {
+		log.Printf("Inventory empty for user %s", m.Author.ID)
+		_, err := s.ChannelMessageSend(m.ChannelID, "🎒 **Ваш инвентарь пуст** ══════\nНичего нет, Император ждёт добычи! 😢")
+		if err != nil {
+			log.Printf("Error sending empty inventory message: %v", err)
+		}
+		return
+	}
 
-    var lines []string
-    var totalValue int
-    for nftID, count := range inv {
-        nft, ok := r.Kki.nfts[nftID]
-        if !ok {
-            log.Printf("Warning: NFT %s not found for user %s", nftID, m.Author.ID)
-            continue
-        }
-        value := r.CalculateNFTPrice(nft) * count
-        totalValue += value
-        rarityEmoji := RarityEmojis[nft.Rarity]
-        lines = append(lines, fmt.Sprintf("%s **%s** (x%d)\n📌 ID для передачи и продажи: %s\n💰 Цена: %d | %s", rarityEmoji, nft.Name, count, nftID, value/count, nft.Rarity))
-    }
-    sort.Strings(lines)
+	var lines []string
+	var totalValue int
+	for nftID, count := range inv {
+		nft, ok := r.Kki.nfts[nftID]
+		if !ok {
+			log.Printf("Warning: NFT %s not found for user %s", nftID, m.Author.ID)
+			continue
+		}
+		value := r.CalculateNFTPrice(nft) * count
+		totalValue += value
+		rarityEmoji := RarityEmojis[nft.Rarity]
+		lines = append(lines, fmt.Sprintf("%s **%s** (x%d)\n📌 ID: %s\n💰 Цена: %d | %s", rarityEmoji, nft.Name, count, nftID, value/count, nft.Rarity))
+	}
+	sort.Strings(lines)
 
-    if len(lines) == 0 {
-        log.Printf("No valid NFTs found in inventory for user %s", m.Author.ID)
-        _, err := s.ChannelMessageSend(m.ChannelID, "🎒 **Ваш инвентарь пуст** ══════\nНичего нет, Император ждёт добычи! 😢")
-        if err != nil {
-            log.Printf("Error sending empty inventory message: %v", err)
-        }
-        return
-    }
+	if len(lines) == 0 {
+		log.Printf("No valid NFTs found in inventory for user %s", m.Author.ID)
+		_, err := s.ChannelMessageSend(m.ChannelID, "🎒 **Ваш инвентарь пуст** ══════\nНичего нет, Император ждёт добычи! 😢")
+		if err != nil {
+			log.Printf("Error sending empty inventory message: %v", err)
+		}
+		return
+	}
 
-    embed := &discordgo.MessageEmbed{
-        Title:       "🎒 **Инвентарь** ══════",
-        Description: fmt.Sprintf("Общая стоимость: 💰 %d\n\n%s", totalValue, strings.Join(lines, "\n\n")),
-        Color:       0x00FF00,
-        Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username)},
-    }
-    _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
-    if err != nil {
-        log.Printf("Error sending inventory embed for user %s: %v", m.Author.ID, err)
-        s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при отображении инвентаря! Попробуйте позже.")
-    } else {
-        log.Printf("Inventory sent successfully for user %s", m.Author.ID)
-    }
+	// Split lines into chunks to avoid exceeding Discord's 6000-character embed limit
+	const maxItemsPerEmbed = 10 // Adjust based on typical NFT description length
+	const maxEmbedSize = 6000   // Discord's maximum embed size
+	var embeds []*discordgo.MessageEmbed
+	var currentLines []string
+	currentSize := len("🎒 **Инвентарь** ══════\n") + len(fmt.Sprintf("Общая стоимость: 💰 %d\n\n", totalValue)) + len(fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username))
+
+	for i, line := range lines {
+		lineSize := len(line) + len("\n\n") // Account for separator
+		if len(currentLines) >= maxItemsPerEmbed || currentSize+lineSize > maxEmbedSize-500 { // 500 chars buffer
+			// Create embed for current chunk
+			embed := &discordgo.MessageEmbed{
+				Title:       fmt.Sprintf("🎒 **Инвентарь (Часть %d)** ══════", len(embeds)+1),
+				Description: fmt.Sprintf("Общая стоимость: 💰 %d\n\n%s", totalValue, strings.Join(currentLines, "\n\n")),
+				Color:       0x00FF00,
+				Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username)},
+			}
+			embeds = append(embeds, embed)
+			log.Printf("Created embed %d with %d items, estimated size: %d chars", len(embeds), len(currentLines), currentSize)
+			currentLines = []string{}
+			currentSize = len("🎒 **Инвентарь** ══════\n") + len(fmt.Sprintf("Общая стоимость: 💰 %d\n\n", totalValue)) + len(fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username))
+		}
+		currentLines = append(currentLines, line)
+		currentSize += lineSize
+	}
+
+	// Add the final chunk
+	if len(currentLines) > 0 {
+		embed := &discordgo.MessageEmbed{
+			Title:       fmt.Sprintf("🎒 **Инвентарь (Часть %d)** ══════", len(embeds)+1),
+			Description: fmt.Sprintf("Общая стоимость: 💰 %d\n\n%s", totalValue, strings.Join(currentLines, "\n\n")),
+			Color:       0x00FF00,
+			Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username)},
+		}
+		embeds = append(embeds, embed)
+		log.Printf("Created final embed %d with %d items, estimated size: %d chars", len(embeds), len(currentLines), currentSize)
+	}
+
+	// Send all embeds
+	for i, embed := range embeds {
+		_, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+		if err != nil {
+			log.Printf("Error sending inventory embed %d for user %s: %v", i+1, m.Author.ID, err)
+			s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при отображении инвентаря! Попробуйте позже.")
+			return
+		}
+	}
+	log.Printf("Inventory sent successfully for user %s in %d embeds", m.Author.ID, len(embeds))
 }
 
 // HandleSellCommand !sell <nftID> <count>
