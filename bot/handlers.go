@@ -274,6 +274,10 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	command := strings.TrimSpace(strings.ToLower(m.Content))
 	log.Printf("Processing command: %s from %s", command, m.Author.ID)
 	switch {
+	case strings.HasPrefix(customID, "sell_duplicates_confirm_"):
+    	r.HandleSellDuplicatesConfirm(s, i)
+	case strings.HasPrefix(customID, "sell_duplicates_cancel_"):
+    	r.HandleSellDuplicatesCancel(s, i)	
 	case strings.HasPrefix(command, "!cpoll"):
 		log.Printf("Matched !cpoll")
 		rank.HandlePollCommand(s, m, m.Content)
@@ -360,6 +364,9 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case command == "!inventory":
 		log.Printf("Matched !inventory")
 		rank.HandleInventoryCommand(s, m)
+	case command == "!sell_duplicates":
+    	log.Printf("Matched !sell_duplicates")
+    	r.HandleSellDuplicatesCommand(s, m)	
 	case command == "!case_inventory":
 		log.Printf("Matched !case_inventory")
 		rank.HandleCaseInventoryCommand(s, m)

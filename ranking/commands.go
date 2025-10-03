@@ -400,6 +400,44 @@ func formatReason(reason string) string {
 	return fmt.Sprintf(" (причина: %s)", reason)
 }
 
+// HandleCaseHelpCommand !case_help - обновленная версия
+func (r *Ranking) HandleCaseHelpCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+    embed := &discordgo.MessageEmbed{
+        Title:       "📦 **Помощь по кейсам, NFT и экономике** ══════",
+        Description: "Славь Императора! 👑 Динамическая экономика привязана к курсу BTC",
+        Color:       0xFFD700,
+        Fields: []*discordgo.MessageEmbedField{
+            {
+                Name:   "💰 **Экономика и цены**",
+                Value:  "```!btc - Текущий курс биткойна\n!prices - Динамика цен по редкостям\n!price_stats - Подробная статистика цен```",
+                Inline: true,
+            },
+            {
+                Name:   "📦 **Кейсы и инвентарь**",
+                Value:  "```!case_inventory - Мои кейсы\n!open_case <ID> - Открыть кейс\n!daily_case - Ежедневный кейс\n!case_bank - Кейсы в банке\n!buy_case_bank <ID> <count> - Купить из банка\n!case_trade @user <ID> <count> - Купить у игрока```",
+                Inline: true,
+            },
+            {
+                Name:   "🃏 **NFT и торговля**",
+                Value:  "```!inventory - Мои NFT\n!nft_show <ID> - Показать NFT\n!sell <ID> <count> - Продать NFT\n!sell_duplicates - Продать все дубликаты\n!trade_nft @user <ID> <count> - Передать NFT\n!top_inventories - Топ-10 инвентарей\n!market - Рыночные цены (скоро)```",
+                Inline: true,
+            },
+            {
+                Name:   "👑 **Админские команды**",
+                Value:  "```!sync_nfts - Синхронизация с Sheets\n!a_give_case @user <ID> - Выдать кейс\n!a_give_nft @user <ID> <count> - Выдать NFT\n!a_remove_nft @user <ID> <count> - Удалить NFT\n!a_refresh_bank - Обновить банк кейсов\n!a_reset_case_limits - Сбросить лимиты\n!test_clear_all_nfts - Очистить всё```",
+                Inline: false,
+            },
+        },
+        Footer: &discordgo.MessageEmbedFooter{
+            Text: fmt.Sprintf("Вызвал: %s | Редкие NFT зависят от курса BTC!", m.Author.Username),
+        },
+    }
+    _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+    if err != nil {
+        log.Printf("Error sending case help embed: %v", err)
+    }
+}
+
 // HandleStatsCommand обрабатывает команду !stats.
 func (r *Ranking) HandleStatsCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	log.Printf("Обработка !stats от %s", m.Author.ID)

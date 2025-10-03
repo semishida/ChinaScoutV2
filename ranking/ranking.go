@@ -246,29 +246,54 @@ func (r *Ranking) SaveUserInventory(userID string, inv UserInventory) {
 
 // HandleInventoryCommand отображает инвентарь пользователя
 func (r *Ranking) HandleInventoryCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
-	inv := r.GetUserInventory(m.Author.ID)
-	if len(inv) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "🎒 **Ваш инвентарь пуст** ══════\nНичего нет, Император ждёт добычи! 😢")
-		return
-	}
+    log.Printf("Starting HandleInventoryCommand for user %s", m.Author.ID)
+    inv := r.GetUserInventory(m.Author.ID)
+    if len(inv) == 0 {
+        log.Printf("Inventory empty for user %s", m.Author.ID)
+        _, err := s.ChannelMessageSend(m.ChannelID, "🎒 **Ваш инвентарь пуст** ══════\nНичего нет, Император ждёт добычи! 😢")
+        if err != nil {
+            log.Printf("Error sending empty inventory message: %v", err)
+        }
+        return
+    }
 
-	var lines []string
-	for nftID, count := range inv {
-		nft, ok := r.Kki.nfts[nftID]
-		if !ok {
-			continue
-		}
-		rarityEmoji := RarityEmojis[nft.Rarity]
-		lines = append(lines, fmt.Sprintf("%s **%s** (x%d)\n📌 ID для передачи и продажи: %s\n💰 Цена: %d | %s", rarityEmoji, nft.Name, count, nftID, nft.Price, nft.Rarity))
-	}
-	sort.Strings(lines)
-	embed := &discordgo.MessageEmbed{
-		Title:       "🎒 **Инвентарь** ══════",
-		Description: strings.Join(lines, "\n\n"),
-		Color:       0x00FF00,
-		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username)},
-	}
-	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+    var lines []string
+    var totalValue int
+    for nftID, count := range inv {
+        nft, ok := r.Kki.nfts[nftID]
+        if !ok {
+            log.Printf("Warning: NFT %s not found for user %s", nftID, m.Author.ID)
+            continue
+        }
+        value := r.CalculateNFTPrice(nft) * count
+        totalValue += value
+        rarityEmoji := RarityEmojis[nft.Rarity]
+        lines = append(lines, fmt.Sprintf("%s **%s** (x%d)\n📌 ID для передачи и продажи: %s\n💰 Цена: %d | %s", rarityEmoji, nft.Name, count, nftID, value/count, nft.Rarity))
+    }
+    sort.Strings(lines)
+
+    if len(lines) == 0 {
+        log.Printf("No valid NFTs found in inventory for user %s", m.Author.ID)
+        _, err := s.ChannelMessageSend(m.ChannelID, "🎒 **Ваш инвентарь пуст** ══════\nНичего нет, Император ждёт добычи! 😢")
+        if err != nil {
+            log.Printf("Error sending empty inventory message: %v", err)
+        }
+        return
+    }
+
+    embed := &discordgo.MessageEmbed{
+        Title:       "🎒 **Инвентарь** ══════",
+        Description: fmt.Sprintf("Общая стоимость: 💰 %d\n\n%s", totalValue, strings.Join(lines, "\n\n")),
+        Color:       0x00FF00,
+        Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username)},
+    }
+    _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+    if err != nil {
+        log.Printf("Error sending inventory embed for user %s: %v", m.Author.ID, err)
+        s.ChannelMessageSend(m.ChannelID, "❌ Ошибка при отображении инвентаря! Попробуйте позже.")
+    } else {
+        log.Printf("Inventory sent successfully for user %s", m.Author.ID)
+    }
 }
 
 // HandleSellCommand !sell <nftID> <count>
@@ -338,6 +363,300 @@ func (r *Ranking) HandleSellCommand(s *discordgo.Session, m *discordgo.MessageCr
 	r.mu.Lock()
 	r.sellMessageIDs[m.Author.ID] = msg.ID
 	r.mu.Unlock()
+}
+
+func (r *Ranking) HandleSellDuplicatesCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+    log.Printf("Starting HandleSellDuplicatesCommand for user %s", m.Author.ID)
+    userID := m.Author.ID
+    inv := r.GetUserInventory(userID)
+    if len(inv) == 0 {
+        log.Printf("Inventory empty for user %s", userID)
+        _, err := s.ChannelMessageSend(m.ChannelID, "❌ **Ваш инвентарь пуст!**")
+        if err != nil {
+            log.Printf("Error sending empty inventory message: %v", err)
+        }
+        return
+    }
+
+    // Находим дубликаты (count > 1)
+    var duplicates []struct {
+        NFTID string
+        Count int // Сколько продать (count - 1, оставляем 1)
+    }
+    var totalSum int
+    var cardList []string
+    for nftID, count := range inv {
+        if count > 1 {
+            sellCount := count - 1
+            nft, ok := r.Kki.nfts[nftID]
+            if !ok {
+                log.Printf("Warning: NFT %s not found for user %s", nftID, userID)
+                continue
+            }
+            value := r.CalculateNFTPrice(nft) * sellCount
+            totalSum += value
+            duplicates = append(duplicates, struct {
+                NFTID string
+                Count int
+            }{nftID, sellCount})
+            cardList = append(cardList, fmt.Sprintf("%s **%s** (%s) x%d - 💰 %d", RarityEmojis[nft.Rarity], nft.Name, nft.Rarity, sellCount, value))
+        }
+    }
+
+    if len(duplicates) == 0 {
+        log.Printf("No duplicates found for user %s", userID)
+        _, err := s.ChannelMessageSend(m.ChannelID, "❌ **Нет дубликатов для продажи!**")
+        if err != nil {
+            log.Printf("Error sending no duplicates message: %v", err)
+        }
+        return
+    }
+
+    // Embed с подтверждением
+    embed := &discordgo.MessageEmbed{
+        Title:       "🛒 **Подтверждение продажи дубликатов** ══════",
+        Description: fmt.Sprintf("Вы хотите продать следующие дубликаты?\nОбщая сумма: 💰 %d\n\n%s", totalSum, strings.Join(cardList, "\n")),
+        Color:       0xFFD700,
+        Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username)},
+    }
+
+    customID := fmt.Sprintf("sell_duplicates_confirm_%s", userID)
+    cancelID := fmt.Sprintf("sell_duplicates_cancel_%s", userID)
+    components := []discordgo.MessageComponent{
+        discordgo.ActionsRow{
+            Components: []discordgo.MessageComponent{
+                discordgo.Button{
+                    Label:    "✅ Подтвердить",
+                    Style:    discordgo.SuccessButton,
+                    CustomID: customID,
+                },
+                discordgo.Button{
+                    Label:    "❌ Отменить",
+                    Style:    discordgo.DangerButton,
+                    CustomID: cancelID,
+                },
+            },
+        },
+    }
+
+    msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+        Embed:      embed,
+        Components: components,
+    })
+    if err != nil {
+        log.Printf("Error sending sell duplicates embed for user %s: %v", userID, err)
+        _, err = s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка при создании подтверждения продажи!**")
+        if err != nil {
+            log.Printf("Error sending error message: %v", err)
+        }
+        return
+    }
+
+    // Сохраняем данные о продаже в Redis с TTL
+    sellData := struct {
+        Duplicates []struct {
+            NFTID string
+            Count int
+        }
+        TotalSum  int
+        MessageID string
+    }{Duplicates: duplicates, TotalSum: totalSum, MessageID: msg.ID}
+    jsonData, _ := json.Marshal(sellData)
+    err = r.redis.Set(r.ctx, "sell_duplicates:"+userID, jsonData, 5*time.Minute).Err()
+    if err != nil {
+        log.Printf("Error saving sell duplicates data for user %s: %v", userID, err)
+    }
+
+    r.mu.Lock()
+    r.sellMessageIDs[userID] = msg.ID
+    r.mu.Unlock()
+}
+
+// HandleSellDuplicatesConfirm обрабатывает подтверждение продажи дубликатов
+func (r *Ranking) HandleSellDuplicatesConfirm(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    userID := strings.TrimPrefix(i.MessageComponentData().CustomID, "sell_duplicates_confirm_")
+    if i.Member.User.ID != userID {
+        _, err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+            Type: discordgo.InteractionResponseChannelMessageWithSource,
+            Data: &discordgo.InteractionResponseData{
+                Content: "❌ **Кнопка не для вас! Император гневен! 👑**",
+                Flags:   discordgo.MessageFlagsEphemeral,
+            },
+        })
+        if err != nil {
+            log.Printf("Error responding to unauthorized sell duplicates confirm: %v", err)
+        }
+        return
+    }
+
+    jsonData, err := r.redis.Get(r.ctx, "sell_duplicates:"+userID).Bytes()
+    if err != nil {
+        log.Printf("Error retrieving sell duplicates data for user %s: %v", userID, err)
+        _, err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+            Type: discordgo.InteractionResponseChannelMessageWithSource,
+            Data: &discordgo.InteractionResponseData{
+                Content: "❌ **Время подтверждения истекло или данные утеряны!**",
+                Flags:   discordgo.MessageFlagsEphemeral,
+            },
+        })
+        if err != nil {
+            log.Printf("Error responding to expired sell duplicates: %v", err)
+        }
+        return
+    }
+
+    var sellData struct {
+        Duplicates []struct {
+            NFTID string
+            Count int
+        }
+        TotalSum  int
+        MessageID string
+    }
+    if err := json.Unmarshal(jsonData, &sellData); err != nil {
+        log.Printf("Error unmarshaling sell duplicates data for user %s: %v", userID, err)
+        _, err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+            Type: discordgo.InteractionResponseChannelMessageWithSource,
+            Data: &discordgo.InteractionResponseData{
+                Content: "❌ **Ошибка обработки данных продажи!**",
+                Flags:   discordgo.MessageFlagsEphemeral,
+            },
+        })
+        if err != nil {
+            log.Printf("Error responding to unmarshal error: %v", err)
+        }
+        return
+    }
+
+    // Проверка инвентаря
+    inv := r.GetUserInventory(userID)
+    for _, dup := range sellData.Duplicates {
+        if inv[dup.NFTID] < dup.Count {
+            log.Printf("Insufficient NFTs for user %s, NFTID %s, required %d", userID, dup.NFTID, dup.Count)
+            _, err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+                Type: discordgo.InteractionResponseChannelMessageWithSource,
+                Data: &discordgo.InteractionResponseData{
+                    Content: "❌ **Недостаточно NFT для продажи!**",
+                    Flags:   discordgo.MessageFlagsEphemeral,
+                },
+            })
+            if err != nil {
+                log.Printf("Error responding to insufficient NFTs: %v", err)
+            }
+            return
+        }
+    }
+
+    // Выполняем продажу
+    var soldItems []string
+    for _, dup := range sellData.Duplicates {
+        inv[dup.NFTID] -= dup.Count
+        if inv[dup.NFTID] <= 0 {
+            delete(inv, dup.NFTID)
+        }
+        nft := r.Kki.nfts[dup.NFTID]
+        soldItems = append(soldItems, fmt.Sprintf("%s **%s** (x%d)", RarityEmojis[nft.Rarity], nft.Name, dup.Count))
+    }
+    r.SaveUserInventory(userID, inv)
+
+    // Начисляем кредиты
+    r.UpdateRating(userID, sellData.TotalSum)
+
+    // Логируем операцию
+    r.LogCreditOperation(s, fmt.Sprintf("🛒 **%s** продал дубликаты NFT за 💰 %d кредитов: %s", i.Member.User.Username, sellData.TotalSum, strings.Join(soldItems, ", ")))
+
+    // Обновляем сообщение
+    embed := &discordgo.MessageEmbed{
+        Title:       "🛒 **Продажа дубликатов завершена** ══════",
+        Description: fmt.Sprintf("✅ **Продано** за 💰 %d кредитов:\n%s", sellData.TotalSum, strings.Join(soldItems, "\n")),
+        Color:       0x00FF00,
+        Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", i.Member.User.Username)},
+    }
+    emptyComponents := []discordgo.MessageComponent{}
+    _, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+        Channel:    i.ChannelID,
+        ID:         sellData.MessageID,
+        Embed:      embed,
+        Components: &emptyComponents,
+    })
+    if err != nil {
+        log.Printf("Error updating sell duplicates message: %v", err)
+    }
+
+    _, err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+        Type: discordgo.InteractionResponseChannelMessageWithSource,
+        Data: &discordgo.InteractionResponseData{
+            Content: fmt.Sprintf("✅ **Продано** за 💰 %d кредитов!", sellData.TotalSum),
+        },
+    })
+    if err != nil {
+        log.Printf("Error responding to sell duplicates confirm: %v", err)
+    }
+
+    r.mu.Lock()
+    delete(r.sellMessageIDs, userID)
+    r.mu.Unlock()
+    r.redis.Del(r.ctx, "sell_duplicates:"+userID)
+}
+
+// HandleSellDuplicatesCancel обрабатывает отмену продажи дубликатов
+func (r *Ranking) HandleSellDuplicatesCancel(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    userID := strings.TrimPrefix(i.MessageComponentData().CustomID, "sell_duplicates_cancel_")
+    if i.Member.User.ID != userID {
+        _, err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+            Type: discordgo.InteractionResponseChannelMessageWithSource,
+            Data: &discordgo.InteractionResponseData{
+                Content: "❌ **Кнопка не для вас! Император гневен! 👑**",
+                Flags:   discordgo.MessageFlagsEphemeral,
+            },
+        })
+        if err != nil {
+            log.Printf("Error responding to unauthorized sell duplicates cancel: %v", err)
+        }
+        return
+    }
+
+    var sellData struct {
+        MessageID string
+    }
+    jsonData, err := r.redis.Get(r.ctx, "sell_duplicates:"+userID).Bytes()
+    if err == nil {
+        json.Unmarshal(jsonData, &sellData)
+    } else {
+        log.Printf("Error retrieving sell duplicates data for cancel, user %s: %v", userID, err)
+    }
+
+    embed := &discordgo.MessageEmbed{
+        Title:       "🛒 **Продажа дубликатов отменена** ══════",
+        Description: "❌ Продажа отменена. Император разочарован! 😢",
+        Color:       0xFF0000,
+        Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Владелец: %s | Славь Императора! 👑", i.Member.User.Username)},
+    }
+    emptyComponents := []discordgo.MessageComponent{}
+    _, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+        Channel:    i.ChannelID,
+        ID:         sellData.MessageID,
+        Embed:      embed,
+        Components: &emptyComponents,
+    })
+    if err != nil {
+        log.Printf("Error updating sell duplicates cancel message: %v", err)
+    }
+
+    _, err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+        Type: discordgo.InteractionResponseChannelMessageWithSource,
+        Data: &discordgo.InteractionResponseData{
+            Content: "❌ **Продажа дубликатов отменена.**",
+        },
+    })
+    if err != nil {
+        log.Printf("Error responding to sell duplicates cancel: %v", err)
+    }
+
+    r.mu.Lock()
+    delete(r.sellMessageIDs, userID)
+    r.mu.Unlock()
+    r.redis.Del(r.ctx, "sell_duplicates:"+userID)
 }
 
 // HandleSellConfirm обрабатывает подтверждение продажи
@@ -1084,27 +1403,27 @@ func (r *Ranking) HandleCaseHelpCommand(s *discordgo.Session, m *discordgo.Messa
 		Description: "Славь Императора! 👑 Динамическая экономика привязана к курсу BTC",
 		Color:       0xFFD700,
 		Fields: []*discordgo.MessageEmbedField{
-			{
-				Name:   "💰 **Экономика и цены**",
-				Value:  "```!btc - Текущий курс биткойна\n!prices - Динамика цен по редкостям\n!price_stats - Подробная статистика цен```",
-				Inline: true,
-			},
-			{
-				Name:   "📦 **Кейсы и инвентарь**",
-				Value:  "```!case_inventory - Мои кейсы\n!open_case <ID> - Открыть кейс\n!daily_case - Ежедневный кейс\n!case_bank - Кейсы в банке\n!buy_case_bank <ID> <count> - Купить из банка\n!case_trade @user <ID> <count> - Купить у игрока```",
-				Inline: true,
-			},
-			{
-				Name:   "🃏 **NFT и торговля**",
-				Value:  "```!inventory - Мои NFT\n!nft_show <ID> - Показать NFT\n!sell <ID> <count> - Продать NFT\n!trade_nft @user <ID> <count> - Передать NFT\n!market - Рыночные цены (скоро)```",
-				Inline: true,
-			},
-			{
-				Name:   "👑 **Админские команды**",
-				Value:  "```!sync_nfts - Синхронизация с Sheets\n!a_give_case @user <ID> - Выдать кейс\n!a_give_nft @user <ID> <count> - Выдать NFT\n!a_remove_nft @user <ID> <count> - Удалить NFT\n!a_refresh_bank - Обновить банк кейсов\n!a_reset_case_limits - Сбросить лимиты\n!test_clear_all_nfts - Очистить всё```",
-				Inline: false,
-			},
-		},
+            {
+                Name:   "💰 **Экономика и цены**",
+                Value:  "```!btc - Текущий курс биткойна\n!prices - Динамика цен по редкостям\n!price_stats - Подробная статистика цен```",
+                Inline: true,
+            },
+            {
+                Name:   "📦 **Кейсы и инвентарь**",
+                Value:  "```!case_inventory - Мои кейсы\n!open_case <ID> - Открыть кейс\n!daily_case - Ежедневный кейс\n!case_bank - Кейсы в банке\n!buy_case_bank <ID> <count> - Купить из банка\n!case_trade @user <ID> <count> - Купить у игрока```",
+                Inline: true,
+            },
+            {
+                Name:   "🃏 **NFT и торговля**",
+                Value:  "```!inventory - Мои NFT\n!nft_show <ID> - Показать NFT\n!sell <ID> <count> - Продать NFT\n!sell_duplicates - Продать все дубликаты\n!trade_nft @user <ID> <count> - Передать NFT\n!top_inventories - Топ-10 инвентарей\n!market - Рыночные цены (скоро)```",
+                Inline: true,
+            },
+            {
+                Name:   "👑 **Админские команды**",
+                Value:  "```!sync_nfts - Синхронизация с Sheets\n!a_give_case @user <ID> - Выдать кейс\n!a_give_nft @user <ID> <count> - Выдать NFT\n!a_remove_nft @user <ID> <count> - Удалить NFT\n!a_refresh_bank - Обновить банк кейсов\n!a_reset_case_limits - Сбросить лимиты\n!test_clear_all_nfts - Очистить всё```",
+                Inline: false,
+            },
+        },
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: fmt.Sprintf("Вызвал: %s | Редкие NFT зависят от курса BTC!", m.Author.Username),
 		},
