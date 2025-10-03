@@ -245,18 +245,6 @@ func (r *Ranking) SaveUserInventory(userID string, inv UserInventory) {
 }
 
 // HandleInventoryCommand отображает инвентарь пользователя
-gopackage ranking
-
-import (
-	"fmt"
-	"log"
-	"sort"
-	"strings"
-
-	"github.com/bwmarrin/discordgo"
-)
-
-// HandleInventoryCommand отображает инвентарь пользователя
 func (r *Ranking) HandleInventoryCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	log.Printf("Starting HandleInventoryCommand for user %s", m.Author.ID)
 	inv := r.GetUserInventory(m.Author.ID)
