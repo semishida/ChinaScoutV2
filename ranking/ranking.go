@@ -476,7 +476,7 @@ func (r *Ranking) HandleSellDuplicatesCommand(s *discordgo.Session, m *discordgo
 func (r *Ranking) HandleSellDuplicatesConfirm(s *discordgo.Session, i *discordgo.InteractionCreate) {
     userID := strings.TrimPrefix(i.MessageComponentData().CustomID, "sell_duplicates_confirm_")
     if i.Member.User.ID != userID {
-        _, err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+        err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
             Type: discordgo.InteractionResponseChannelMessageWithSource,
             Data: &discordgo.InteractionResponseData{
                 Content: "❌ **Кнопка не для вас! Император гневен! 👑**",
@@ -492,7 +492,7 @@ func (r *Ranking) HandleSellDuplicatesConfirm(s *discordgo.Session, i *discordgo
     jsonData, err := r.redis.Get(r.ctx, "sell_duplicates:"+userID).Bytes()
     if err != nil {
         log.Printf("Error retrieving sell duplicates data for user %s: %v", userID, err)
-        _, err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+        err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
             Type: discordgo.InteractionResponseChannelMessageWithSource,
             Data: &discordgo.InteractionResponseData{
                 Content: "❌ **Время подтверждения истекло или данные утеряны!**",
@@ -515,7 +515,7 @@ func (r *Ranking) HandleSellDuplicatesConfirm(s *discordgo.Session, i *discordgo
     }
     if err := json.Unmarshal(jsonData, &sellData); err != nil {
         log.Printf("Error unmarshaling sell duplicates data for user %s: %v", userID, err)
-        _, err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+        err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
             Type: discordgo.InteractionResponseChannelMessageWithSource,
             Data: &discordgo.InteractionResponseData{
                 Content: "❌ **Ошибка обработки данных продажи!**",
@@ -533,7 +533,7 @@ func (r *Ranking) HandleSellDuplicatesConfirm(s *discordgo.Session, i *discordgo
     for _, dup := range sellData.Duplicates {
         if inv[dup.NFTID] < dup.Count {
             log.Printf("Insufficient NFTs for user %s, NFTID %s, required %d", userID, dup.NFTID, dup.Count)
-            _, err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+            err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
                 Type: discordgo.InteractionResponseChannelMessageWithSource,
                 Data: &discordgo.InteractionResponseData{
                     Content: "❌ **Недостаточно NFT для продажи!**",
@@ -583,7 +583,7 @@ func (r *Ranking) HandleSellDuplicatesConfirm(s *discordgo.Session, i *discordgo
         log.Printf("Error updating sell duplicates message: %v", err)
     }
 
-    _, err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+    err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
         Type: discordgo.InteractionResponseChannelMessageWithSource,
         Data: &discordgo.InteractionResponseData{
             Content: fmt.Sprintf("✅ **Продано** за 💰 %d кредитов!", sellData.TotalSum),
@@ -603,7 +603,7 @@ func (r *Ranking) HandleSellDuplicatesConfirm(s *discordgo.Session, i *discordgo
 func (r *Ranking) HandleSellDuplicatesCancel(s *discordgo.Session, i *discordgo.InteractionCreate) {
     userID := strings.TrimPrefix(i.MessageComponentData().CustomID, "sell_duplicates_cancel_")
     if i.Member.User.ID != userID {
-        _, err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+        err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
             Type: discordgo.InteractionResponseChannelMessageWithSource,
             Data: &discordgo.InteractionResponseData{
                 Content: "❌ **Кнопка не для вас! Император гневен! 👑**",
@@ -643,7 +643,7 @@ func (r *Ranking) HandleSellDuplicatesCancel(s *discordgo.Session, i *discordgo.
         log.Printf("Error updating sell duplicates cancel message: %v", err)
     }
 
-    _, err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+    err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
         Type: discordgo.InteractionResponseChannelMessageWithSource,
         Data: &discordgo.InteractionResponseData{
             Content: "❌ **Продажа дубликатов отменена.**",
