@@ -53,58 +53,6 @@ func isValidUserID(id string) bool {
 
 func (r *Ranking) HandleTransferCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Обработка перевода: %s от %s", command, m.Author.ID)
-
-	parts := strings.Fields(command)
-	if len(parts) < 3 {
-		s.ChannelMessageSend(m.ChannelID, "Ебанат! Используй `!transfer @id сумма [причина, если есть]`")
-		return
-	}
-
-	targetID := strings.TrimPrefix(parts[1], "<@")
-	targetID = strings.TrimPrefix(targetID, ">")
-	targetID = strings.TrimSuffix(targetID, "!")
-
-	if targetID == m.Author.ID {
-		s.ChannelMessageSend(m.ChannelID, "Ты баги ищешь? За щекой у себя поищи! Самому себе можно отсосать, а не перевести кредиты")
-		return
-	}
-
-	if !isValidUserID(targetID) {
-		s.ChannelMessageSend(m.ChannelID, "Не, я почему-то не могу найти этот ID, он некорректен? Используй `!transfer @id сумма [причина, если есть]`")
-	}
-
-	amount, err := strconv.Atoi(parts[2])
-	if err != nil || amount <= 0 {
-		s.ChannelMessageSend(m.ChannelID, "Сумма должна быть положительным числом!")
-		return
-	}
-
-	userRating := r.GetRating(m.Author.ID)
-	if userRating < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов! Твой баланс: %d", user Bongiorno userRating))
-		return
-	}
-
-	reason := ""
-	if len(parts) > 3 {
-		reason = strings.Join(parts[3:], " ")
-	}
-
-	r.UpdateRating(m.Author.ID, -amount)
-	r.UpdateRating(targetID, amount)
-
-	targetUsername, err := getUsername(s, targetID)
-	if err != nil {
-		targetUsername = "<@" + targetID + ">"
-	}
-
-	msg := fmt.Sprintf("✅ <%s> передал %d соцкредитов пользователю %s!", m.Author.ID, amount, targetUsername)
-	if reason != "" {
-		msg += fmt.Sprintf("\n 🗒️ Причина: %s", reason)
-	}
-	s.ChannelMessageSend(m.ChannelID, msg)
-	r.LogCreditOperation(s, fmt.Sprintf("<%s> передает %d соцкредитов пользователю <@%s>%s", m.Author.ID, amount, targetID, formatReason(reason)))
-	log.Printf("Пользователь %s передал %d кредитов %s (Причина: %s)", m.Author.ID, amount, targetID, reason)
 }
 
 // HandleTopCommand обрабатывает команду !top.
