@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort" // Added missing import
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
-
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -81,7 +81,7 @@ func (r *Ranking) HandleTransferCommand(s *discordgo.Session, m *discordgo.Messa
 
 	userRating := r.GetRating(m.Author.ID)
 	if userRating < amount {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов! Твой баланс: %d", userRating))
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Недостаточно кредитов! Твой баланс: %d", user Bongiorno userRating))
 		return
 	}
 
@@ -204,6 +204,7 @@ func (r *Ranking) HandleAdminCommand(s *discordgo.Session, m *discordgo.MessageC
 	r.LogCreditOperation(s, fmt.Sprintf("Админ <@%s> изменил баланс %s: %+d соцкредитов%s", m.Author.ID, targetUsername, amount, formatReason(reason)))
 	log.Printf("Админ %s изменил рейтинг %s на %d (причина: %s)", m.Author.ID, targetID, amount, reason)
 }
+
 // HandleAdminMassCommand обрабатывает команду !adminmass.
 func (r *Ranking) HandleAdminMassCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	log.Printf("Обработка !adminmass: %s от %s", command, m.Author.ID)
@@ -215,7 +216,7 @@ func (r *Ranking) HandleAdminMassCommand(s *discordgo.Session, m *discordgo.Mess
 
 	parts := strings.Fields(command)
 	if len(parts) < 3 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!adminmass <+|-|=><сумма> @id1 @id2 ... [причина]`")
+		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!adminmass <+/-/=><сумма> @id1 @id2 ... [причина]`")
 		return
 	}
 
@@ -470,7 +471,7 @@ func (r *Ranking) HandleTopInventoriesCommand(s *discordgo.Session, m *discordgo
 
     // Сортируем по totalValue (убывание)
     sort.Slice(inventories, func(i, j int) bool {
-        return inventories[i].TotalValue > inventories[i].TotalValue
+        return inventories[i].TotalValue > inventories[j].TotalValue // Fixed sorting bug
     })
 
     // Ограничиваем топ-10
