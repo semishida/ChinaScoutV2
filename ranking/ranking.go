@@ -288,7 +288,7 @@ func (r *Ranking) HandleInventoryCommand(s *discordgo.Session, m *discordgo.Mess
 	var currentLines []string
 	currentSize := len("🎒 **Инвентарь** ══════\n") + len(fmt.Sprintf("Общая стоимость: 💰 %d\n\n", totalValue)) + len(fmt.Sprintf("Владелец: %s | Славь Императора! 👑", m.Author.Username))
 
-	for i, line := range lines {
+	for _, line := range lines {
 		lineSize := len(line) + len("\n\n") // Account for separator
 		if len(currentLines) >= maxItemsPerEmbed || currentSize+lineSize > maxEmbedSize-500 { // 500 chars buffer
 			// Create embed for current chunk
