@@ -414,3 +414,104 @@ func (r *Ranking) HandleChelpCommand(s *discordgo.Session, m *discordgo.MessageC
 	}
 	s.ChannelMessageSendEmbed(m.ChannelID, embed)
 }
+
+// InventoryStats хранит статистику инвентаря пользователя
+type InventoryStats struct {
+    UserID     string
+    TotalValue int
+    RareCount  int // Nephrite + Exotic + Legendary
+}
+
+// HandleTopInventoriesCommand отображает топ-10 инвентарей по стоимости
+func (r *Ranking) HandleTopInventoriesCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+    log.Printf("Starting HandleTopInventoriesCommand")
+    var cursor uint64
+    var inventories []InventoryStats
+
+    // Сканируем все ключи inventory:*
+    for {
+        keys, newCursor, err := r.redis.Scan(r.ctx, cursor, "inventory:*", 100).Result()
+        if err != nil {
+            log.Printf("Error scanning inventories: %v", err)
+            _, err = s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка загрузки топа инвентарей!**")
+            if err != nil {
+                log.Printf("Error sending error message: %v", err)
+            }
+            return
+        }
+        cursor = newCursor
+
+        for _, key := range keys {
+            userID := strings.TrimPrefix(key, "inventory:")
+            inv := r.GetUserInventory(userID)
+            var totalValue int
+            var rareCount int
+            for nftID, count := range inv {
+                nft, ok := r.Kki.nfts[nftID]
+                if !ok {
+                    log.Printf("Warning: NFT %s not found for user %s", nftID, userID)
+                    continue
+                }
+                value := r.CalculateNFTPrice(nft) * count
+                totalValue += value
+                if nft.Rarity == "Nephrite" || nft.Rarity == "Exotic" || nft.Rarity == "Legendary" {
+                    rareCount += count
+                }
+            }
+            if totalValue > 0 {
+                inventories = append(inventories, InventoryStats{UserID: userID, TotalValue: totalValue, RareCount: rareCount})
+            }
+        }
+
+        if cursor == 0 {
+            break
+        }
+    }
+
+    // Сортируем по totalValue (убывание)
+    sort.Slice(inventories, func(i, j int) bool {
+        return inventories[i].TotalValue > inventories[i].TotalValue
+    })
+
+    // Ограничиваем топ-10
+    if len(inventories) > 10 {
+        inventories = inventories[:10]
+    }
+
+    if len(inventories) == 0 {
+        log.Printf("No inventories found for top")
+        _, err := s.ChannelMessageSend(m.ChannelID, "🏆 **Топ инвентарей пуст** ══════\nИмператор ждёт богатых коллекционеров! 😢")
+        if err != nil {
+            log.Printf("Error sending empty top inventories message: %v", err)
+        }
+        return
+    }
+
+    // Формируем список
+    var lines []string
+    for i, stats := range inventories {
+        // Попытка получить имя пользователя
+        user, err := s.User(stats.UserID)
+        username := "Неизвестный"
+        if err == nil {
+            username = user.Username
+        } else {
+            log.Printf("Error fetching username for user %s: %v", stats.UserID, err)
+        }
+        lines = append(lines, fmt.Sprintf("%d. **%s** - 💰 %d (Редких: %d)", i+1, username, stats.TotalValue, stats.RareCount))
+    }
+
+    embed := &discordgo.MessageEmbed{
+        Title:       "🏆 **Топ-10 богатых инвентарей** ══════",
+        Description: strings.Join(lines, "\n"),
+        Color:       0xFFD700,
+        Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Вызвал: %s | Славь Императора! 👑", m.Author.Username)},
+    }
+    _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+    if err != nil {
+        log.Printf("Error sending top inventories embed: %v", err)
+        s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка отображения топа!**")
+    } else {
+        log.Printf("Top inventories sent successfully")
+    }
+}
