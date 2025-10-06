@@ -150,6 +150,90 @@ func registerSlashCommands(dg *discordgo.Session) {
 			Name:        "chelp",
 			Description: "Показать справку по командам",
 		},
+		{
+			Name:        "help",
+			Description: "Показать справку по командам",
+		},
+		{
+			Name:        "betcinema",
+			Description: "Сделать ставку на фильм",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "number",
+					Description: "Номер фильма",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "amount",
+					Description: "Сумма ставки",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "bet_cinema",
+			Description: "Сделать ставку на фильм",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "number",
+					Description: "Номер фильма",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "amount",
+					Description: "Сумма ставки",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "cinemalist",
+			Description: "Показать список фильмов",
+		},
+		{
+			Name:        "cinema_list",
+			Description: "Показать список фильмов",
+		},
+		{
+			Name:        "cinema",
+			Description: "Добавить фильм в аукцион",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "title",
+					Description: "Название фильма",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "amount",
+					Description: "Начальная ставка",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "cpoll",
+			Description: "Создать опрос",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "question",
+					Description: "Вопрос опроса",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "options",
+					Description: "Варианты ответов через запятую",
+					Required:    true,
+				},
+			},
+		},
 	}
 
 	// Регистрируем команды

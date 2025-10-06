@@ -171,7 +171,12 @@ func getCommandOptions(options []*discordgo.ApplicationCommandInteractionDataOpt
 		case discordgo.ApplicationCommandOptionUser:
 			args = append(args, "<@"+option.UserValue(nil).ID+">")
 		case discordgo.ApplicationCommandOptionString:
-			args = append(args, option.StringValue())
+			// Если строка содержит пробелы, заключаем в кавычки
+			value := option.StringValue()
+			if strings.Contains(value, " ") {
+				value = `"` + value + `"`
+			}
+			args = append(args, value)
 		case discordgo.ApplicationCommandOptionInteger:
 			args = append(args, fmt.Sprintf("%d", option.IntValue()))
 		case discordgo.ApplicationCommandOptionNumber:
@@ -377,17 +382,38 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	case strings.HasPrefix(command, "/cinema "):
 		log.Printf("Matched /cinema")
 		rank.HandleCinemaCommand(s, m, command)
-	case strings.HasPrefix(command, "/betcinema "):
-		log.Printf("Matched /betcinema")
+	case strings.HasPrefix(command, "/betcinema ") || strings.HasPrefix(command, "/bet_cinema "):
+		log.Printf("Matched /betcinema or /bet_cinema")
 		rank.HandleBetCinemaCommand(s, m, command)
-	case command == "/cinemalist":
-		log.Printf("Matched /cinemalist")
+	case command == "/cinemalist" || command == "/cinema_list":
+		log.Printf("Matched /cinemalist or /cinema_list")
 		rank.HandleCinemaListCommand(s, m)
+	case strings.HasPrefix(command, "/admin_adjust_cinema"):
+		log.Printf("Matched /admin_adjust_cinema")
+		rank.HandleAdjustCinemaCommand(s, m, command)
+	case strings.HasPrefix(command, "/admin_close_dep"):
+		log.Printf("Matched /admin_close_dep")
+		rank.HandleCloseDepCommand(s, m, m.Content)
+	case strings.HasPrefix(command, "/admin_give_nft"):
+		log.Printf("Matched /admin_give_nft")
+		rank.HandleAdminGiveNFT(s, m, m.Content)
+	case strings.HasPrefix(command, "/admin_give_case"):
+		log.Printf("Matched /admin_give_case")
+		rank.HandleAdminGiveCase(s, m, m.Content)
+	case strings.HasPrefix(command, "/admin_remove_nft"):
+		log.Printf("Matched /admin_remove_nft")
+		rank.HandleAdminRemoveNFT(s, m, m.Content)
+	case strings.HasPrefix(command, "/admin_holiday_case"):
+		log.Printf("Matched /admin_holiday_case")
+		rank.HandleAdminHolidayCase(s, m, m.Content)
+	case strings.HasPrefix(command, "/admin_give_holiday_case_all"):
+		log.Printf("Matched /admin_give_holiday_case_all")
+		rank.HandleAdminGiveHolidayCaseAll(s, m, m.Content)
 	case strings.HasPrefix(command, "/admin"):
 		log.Printf("Matched /admin")
 		rank.HandleAdminCommand(s, m, m.Content)
-	case command == "/chelp":
-		log.Printf("Matched /chelp")
+	case command == "/chelp" || command == "/help":
+		log.Printf("Matched /chelp or /help")
 		rank.HandleChelpCommand(s, m)
 	case command == "/china":
 		log.Printf("Matched /china")
