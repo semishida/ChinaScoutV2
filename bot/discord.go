@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"csv2/ranking"
+
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -34,6 +35,10 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 	}
 
 	log.Println("Discord bot is running.")
+
+	// Регистрируем slash-команды
+	registerSlashCommands(dg)
+
 	return dg
 }
 
@@ -58,4 +63,102 @@ func SendFileToDiscord(dg *discordgo.Session, channelID, filePath, caption strin
 	}
 	log.Printf("Sent file to Discord channel %s: %s", channelID, filePath)
 	return nil
+}
+
+// registerSlashCommands регистрирует slash-команды в Discord
+func registerSlashCommands(dg *discordgo.Session) {
+	commands := []*discordgo.ApplicationCommand{
+		{
+			Name:        "china",
+			Description: "Показать информацию о пользователе",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Пользователь для проверки",
+					Required:    false,
+				},
+			},
+		},
+		{
+			Name:        "top",
+			Description: "Показать топ пользователей",
+		},
+		{
+			Name:        "stats",
+			Description: "Показать статистику пользователя",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Пользователь для проверки",
+					Required:    false,
+				},
+			},
+		},
+		{
+			Name:        "blackjack",
+			Description: "Начать игру в блэкджек",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "amount",
+					Description: "Сумма ставки",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "rb",
+			Description: "Игра Красный-Черный",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "color",
+					Description: "Цвет (red/black)",
+					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "Красный", Value: "red"},
+						{Name: "Черный", Value: "black"},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "amount",
+					Description: "Сумма ставки",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "duel",
+			Description: "Вызвать на дуэль",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "amount",
+					Description: "Сумма ставки",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "inventory",
+			Description: "Показать инвентарь",
+		},
+		{
+			Name:        "chelp",
+			Description: "Показать справку по командам",
+		},
+	}
+
+	// Регистрируем команды
+	for _, cmd := range commands {
+		_, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", cmd)
+		if err != nil {
+			log.Printf("Failed to create slash command %s: %v", cmd.Name, err)
+		} else {
+			log.Printf("Successfully registered slash command: %s", cmd.Name)
+		}
+	}
 }

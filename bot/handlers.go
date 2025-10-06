@@ -82,11 +82,37 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 		}
 	})
 
-	// Обработчик взаимодействий (кнопок)
+	// Обработчик взаимодействий (кнопок и slash-команд)
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Member.User.ID == s.State.User.ID {
 			return
 		}
+
+		// Обработка slash-команд
+		if i.Type == discordgo.InteractionApplicationCommand {
+			commandName := i.ApplicationCommandData().Name
+			log.Printf("Received slash command: %s from %s", commandName, i.Member.User.ID)
+
+			// Создаем фиктивное сообщение для совместимости с существующими обработчиками
+			fakeMessage := &discordgo.MessageCreate{
+				Message: &discordgo.Message{
+					ID:        i.ID,
+					ChannelID: i.ChannelID,
+					Content:   "/" + commandName + " " + getCommandOptions(i.ApplicationCommandData().Options),
+					Author:    i.Member.User,
+				},
+			}
+
+			// Обрабатываем команду как обычное сообщение
+			handleCommands(s, fakeMessage, rank)
+
+			// Отвечаем на взаимодействие
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseDeferredMessageUpdate,
+			})
+			return
+		}
+
 		if i.Type == discordgo.InteractionMessageComponent {
 			customID := i.MessageComponentData().CustomID
 			log.Printf("Interaction received, CustomID: %s, ChannelID: %s, UserID: %s", customID, i.ChannelID, i.Member.User.ID)
@@ -135,6 +161,26 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 
 	go handleTelegramUpdates(tgBot, chatID, dg, relayChannelID)
 	select {}
+}
+
+// getCommandOptions преобразует опции slash-команды в строку аргументов
+func getCommandOptions(options []*discordgo.ApplicationCommandInteractionDataOption) string {
+	var args []string
+	for _, option := range options {
+		switch option.Type {
+		case discordgo.ApplicationCommandOptionUser:
+			args = append(args, "<@"+option.UserValue(nil).ID+">")
+		case discordgo.ApplicationCommandOptionString:
+			args = append(args, option.StringValue())
+		case discordgo.ApplicationCommandOptionInteger:
+			args = append(args, fmt.Sprintf("%d", option.IntValue()))
+		case discordgo.ApplicationCommandOptionNumber:
+			args = append(args, fmt.Sprintf("%.2f", option.FloatValue()))
+		default:
+			args = append(args, option.StringValue())
+		}
+	}
+	return strings.Join(args, " ")
 }
 
 func setupTelegram(token, chatID string) (*tgbotapi.BotAPI, int64) {
