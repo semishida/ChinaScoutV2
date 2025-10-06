@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/bwmarrin/discordgo"
+	"github.com/redis/go-redis/v9"
 )
 
 // HandleChinaCommand обрабатывает команду !china.
@@ -27,7 +27,7 @@ func (r *Ranking) HandleChinaCommand(s *discordgo.Session, m *discordgo.MessageC
 		target = strings.TrimPrefix(target, "!")
 		target = strings.TrimSuffix(target, ">")
 		if target == "" || !isValidUserID(target) {
-			s.ChannelMessageSend(m.ChannelID, "❌ Некорректный ID пользователя! Используй формат: `!china @id`")
+			s.ChannelMessageSend(m.ChannelID, "❌ Некорректный ID пользователя! Используй формат: `/china @id`")
 			return
 		}
 		userID = target
@@ -115,7 +115,7 @@ func (r *Ranking) HandleAdminCommand(s *discordgo.Session, m *discordgo.MessageC
 
 	parts := strings.Fields(command)
 	if len(parts) < 3 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!admin @id <сумма> [причина]`")
+		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `/admin @id <сумма> [причина]`")
 		return
 	}
 
@@ -164,7 +164,7 @@ func (r *Ranking) HandleAdminMassCommand(s *discordgo.Session, m *discordgo.Mess
 
 	parts := strings.Fields(command)
 	if len(parts) < 3 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!adminmass <+/-/=><сумма> @id1 @id2 ... [причина]`")
+		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `/adminmass <+/-/=><сумма> @id1 @id2 ... [причина]`")
 		return
 	}
 
@@ -249,7 +249,7 @@ func (r *Ranking) HandleStatsCommand(s *discordgo.Session, m *discordgo.MessageC
 		targetID = strings.TrimSuffix(targetID, ">")
 		targetID = strings.TrimPrefix(targetID, "!")
 		if !isValidUserID(targetID) {
-			s.ChannelMessageSend(m.ChannelID, "❌ Некорректный ID пользователя! Используй: `!stats [@id]`")
+			s.ChannelMessageSend(m.ChannelID, "❌ Некорректный ID пользователя! Используй: `/stats [@id]`")
 			return
 		}
 		var err error
@@ -330,31 +330,31 @@ func (r *Ranking) HandleChelpCommand(s *discordgo.Session, m *discordgo.MessageC
 			URL: "https://i.imgur.com/your-bot-icon.png", // Замени на иконку бота
 		},
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "💰 !china [@id]", Value: "Узнай свой баланс или баланс другого игрока.", Inline: false},
-			{Name: "🏆 !top", Value: "Посмотри топ-5 пользователей по кредитам.", Inline: false},
-			{Name: "📊 !stats", Value: "Проверь свою статистику: кредиты, игры, время в голосовых каналах.", Inline: false},
-			{Name: "📊 !adminstats @id <игра> <поле> <значение>", Value: "Измените статистику игрока (только админы).", Inline: false},
-			{Name: "📜 !transfer @id <сумма> <причина>", Value: "Передать кредиты другому", Inline: false},
-			{Name: "📝 !cpoll Вопрос [Вариант1] [Вариант2] ...", Value: "Создай опрос (только админы).", Inline: false},
-			{Name: "💸 !dep <ID_опроса> <номер_варианта> <сумма>", Value: "Поставь кредиты на вариант в опросе.", Inline: false},
-			{Name: "🔒 !closedep <ID_опроса> <номер>", Value: "Закрой опрос и распредели выигрыши (только админы).", Inline: false},
-			{Name: "📋 !polls", Value: "Посмотри активные опросы.", Inline: false},
-			{Name: "🎰 !rb", Value: "Начни игру в Красный-Чёрный.", Inline: false},
-			{Name: "🔴⚫ !rb <red/black> <сумма>", Value: "Сделай ставку в Красный-Чёрный.", Inline: false},
-			{Name: "♠️ !blackjack", Value: "Начни игру в Блэкджек.", Inline: false},
-			{Name: "🎲 !blackjack <сумма>", Value: "Сделай ставку в Блэкджеке.", Inline: false},
-			{Name: "⚔️ !duel <сумма>", Value: "Вызови любого на дуэль с указанной ставкой.", Inline: false},
-			{Name: "🎁 !admin @id <сумма> [причина]", Value: "Начисли или забери кредиты у пользователя (только админы).", Inline: false},
-			{Name: "⚙️ !adminmass <+/-/=сумма> @id1 @id2 ... [причина]", Value: "Массовое изменение рейтинга (только админы).", Inline: false},
-			{Name: "🚫 !endblackjack @id", Value: "Заверши игру в Блэкджек пользователя (только админы).", Inline: false},
-			{Name: "📜 !chelp", Value: "Покажи это руководство.", Inline: false},
-			{Name: "🎥 !cinema <название> <сумма>", Value: "Предложить новый вариант на киноаукцион.", Inline: false},
-			{Name: "🎥 !betcinema <номер> <сумма>", Value: "Поставить на существующий вариант.", Inline: false},
-			{Name: "📋 !cinemalist", Value: "Посмотреть актуальные варианты.", Inline: false},
-			{Name: "📋 !admincinemalist", Value: "Детальный список вариантов (админы).", Inline: false},
-			{Name: "🗑️ !removelowest <число>", Value: "Удалить <число> самых низких вариантов (админы).", Inline: false},
-			{Name: "⚙️ !adjustcinema <номер> <+/-сумма>", Value: "Корректировать сумму любого кино-варианта (админы).", Inline: false},
-			{Name: "🗑️ !removecinema @id <номер>", Value: "Удалить вариант, предложенный пользователем (админы).", Inline: false},
+			{Name: "💰 /china [@id]", Value: "Узнай свой баланс или баланс другого игрока.", Inline: false},
+			{Name: "🏆 /top", Value: "Посмотри топ-5 пользователей по кредитам.", Inline: false},
+			{Name: "📊 /stats", Value: "Проверь свою статистику: кредиты, игры, время в голосовых каналах.", Inline: false},
+			{Name: "📊 /adminstats @id <игра> <поле> <значение>", Value: "Измените статистику игрока (только админы).", Inline: false},
+			{Name: "📜 /transfer @id <сумма> <причина>", Value: "Передать кредиты другому", Inline: false},
+			{Name: "📝 /cpoll Вопрос [Вариант1] [Вариант2] ...", Value: "Создай опрос (только админы).", Inline: false},
+			{Name: "💸 /dep <ID_опроса> <номер_варианта> <сумма>", Value: "Поставь кредиты на вариант в опросе.", Inline: false},
+			{Name: "🔒 /closedep <ID_опроса> <номер>", Value: "Закрой опрос и распредели выигрыши (только админы).", Inline: false},
+			{Name: "📋 /polls", Value: "Посмотри активные опросы.", Inline: false},
+			{Name: "🎰 /rb", Value: "Начни игру в Красный-Чёрный.", Inline: false},
+			{Name: "🔴⚫ /rb <red/black> <сумма>", Value: "Сделай ставку в Красный-Чёрный.", Inline: false},
+			{Name: "♠️ /blackjack", Value: "Начни игру в Блэкджек.", Inline: false},
+			{Name: "🎲 /blackjack <сумма>", Value: "Сделай ставку в Блэкджеке.", Inline: false},
+			{Name: "⚔️ /duel <сумма>", Value: "Вызови любого на дуэль с указанной ставкой.", Inline: false},
+			{Name: "🎁 /admin @id <сумма> [причина]", Value: "Начисли или забери кредиты у пользователя (только админы).", Inline: false},
+			{Name: "⚙️ /adminmass <+/-/=сумма> @id1 @id2 ... [причина]", Value: "Массовое изменение рейтинга (только админы).", Inline: false},
+			{Name: "🚫 /endblackjack @id", Value: "Заверши игру в Блэкджек пользователя (только админы).", Inline: false},
+			{Name: "📜 /chelp", Value: "Покажи это руководство.", Inline: false},
+			{Name: "🎥 /cinema <название> <сумма>", Value: "Предложить новый вариант на киноаукцион.", Inline: false},
+			{Name: "🎥 /betcinema <номер> <сумма>", Value: "Поставить на существующий вариант.", Inline: false},
+			{Name: "📋 /cinemalist", Value: "Посмотреть актуальные варианты.", Inline: false},
+			{Name: "📋 /admincinemalist", Value: "Детальный список вариантов (админы).", Inline: false},
+			{Name: "🗑️ /removelowest <число>", Value: "Удалить <число> самых низких вариантов (админы).", Inline: false},
+			{Name: "⚙️ /adjustcinema <номер> <+/-сумма>", Value: "Корректировать сумму любого кино-варианта (админы).", Inline: false},
+			{Name: "🗑️ /removecinema @id <номер>", Value: "Удалить вариант, предложенный пользователем (админы).", Inline: false},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "Славь Императора и собирай кредиты! 👑 | Бот создан для веселья и рейтингов",
@@ -366,101 +366,101 @@ func (r *Ranking) HandleChelpCommand(s *discordgo.Session, m *discordgo.MessageC
 
 // InventoryStats хранит статистику инвентаря пользователя
 type InventoryStats struct {
-    UserID     string
-    TotalValue int
-    RareCount  int // Nephrite + Exotic + Legendary
+	UserID     string
+	TotalValue int
+	RareCount  int // Nephrite + Exotic + Legendary
 }
 
 // HandleTopInventoriesCommand отображает топ-10 инвентарей по стоимости
 func (r *Ranking) HandleTopInventoriesCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
-    log.Printf("Starting HandleTopInventoriesCommand")
-    var cursor uint64
-    var inventories []InventoryStats
+	log.Printf("Starting HandleTopInventoriesCommand")
+	var cursor uint64
+	var inventories []InventoryStats
 
-    // Сканируем все ключи inventory:*
-    for {
-        keys, newCursor, err := r.redis.Scan(r.ctx, cursor, "inventory:*", 100).Result()
-        if err != nil {
-            log.Printf("Error scanning inventories: %v", err)
-            _, err = s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка загрузки топа инвентарей!**")
-            if err != nil {
-                log.Printf("Error sending error message: %v", err)
-            }
-            return
-        }
-        cursor = newCursor
+	// Сканируем все ключи inventory:*
+	for {
+		keys, newCursor, err := r.redis.Scan(r.ctx, cursor, "inventory:*", 100).Result()
+		if err != nil {
+			log.Printf("Error scanning inventories: %v", err)
+			_, err = s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка загрузки топа инвентарей!**")
+			if err != nil {
+				log.Printf("Error sending error message: %v", err)
+			}
+			return
+		}
+		cursor = newCursor
 
-        for _, key := range keys {
-            userID := strings.TrimPrefix(key, "inventory:")
-            inv := r.GetUserInventory(userID)
-            var totalValue int
-            var rareCount int
-            for nftID, count := range inv {
-                nft, ok := r.Kki.nfts[nftID]
-                if !ok {
-                    log.Printf("Warning: NFT %s not found for user %s", nftID, userID)
-                    continue
-                }
-                value := r.CalculateNFTPrice(nft) * count
-                totalValue += value
-                if nft.Rarity == "Nephrite" || nft.Rarity == "Exotic" || nft.Rarity == "Legendary" {
-                    rareCount += count
-                }
-            }
-            if totalValue > 0 {
-                inventories = append(inventories, InventoryStats{UserID: userID, TotalValue: totalValue, RareCount: rareCount})
-            }
-        }
+		for _, key := range keys {
+			userID := strings.TrimPrefix(key, "inventory:")
+			inv := r.GetUserInventory(userID)
+			var totalValue int
+			var rareCount int
+			for nftID, count := range inv {
+				nft, ok := r.Kki.nfts[nftID]
+				if !ok {
+					log.Printf("Warning: NFT %s not found for user %s", nftID, userID)
+					continue
+				}
+				value := r.CalculateNFTPrice(nft) * count
+				totalValue += value
+				if nft.Rarity == "Nephrite" || nft.Rarity == "Exotic" || nft.Rarity == "Legendary" {
+					rareCount += count
+				}
+			}
+			if totalValue > 0 {
+				inventories = append(inventories, InventoryStats{UserID: userID, TotalValue: totalValue, RareCount: rareCount})
+			}
+		}
 
-        if cursor == 0 {
-            break
-        }
-    }
+		if cursor == 0 {
+			break
+		}
+	}
 
-    // Сортируем по totalValue (убывание)
-    sort.Slice(inventories, func(i, j int) bool {
-        return inventories[i].TotalValue > inventories[j].TotalValue // Fixed sorting bug
-    })
+	// Сортируем по totalValue (убывание)
+	sort.Slice(inventories, func(i, j int) bool {
+		return inventories[i].TotalValue > inventories[j].TotalValue // Fixed sorting bug
+	})
 
-    // Ограничиваем топ-10
-    if len(inventories) > 10 {
-        inventories = inventories[:10]
-    }
+	// Ограничиваем топ-10
+	if len(inventories) > 10 {
+		inventories = inventories[:10]
+	}
 
-    if len(inventories) == 0 {
-        log.Printf("No inventories found for top")
-        _, err := s.ChannelMessageSend(m.ChannelID, "🏆 **Топ инвентарей пуст** ══════\nИмператор ждёт богатых коллекционеров! 😢")
-        if err != nil {
-            log.Printf("Error sending empty top inventories message: %v", err)
-        }
-        return
-    }
+	if len(inventories) == 0 {
+		log.Printf("No inventories found for top")
+		_, err := s.ChannelMessageSend(m.ChannelID, "🏆 **Топ инвентарей пуст** ══════\nИмператор ждёт богатых коллекционеров! 😢")
+		if err != nil {
+			log.Printf("Error sending empty top inventories message: %v", err)
+		}
+		return
+	}
 
-    // Формируем список
-    var lines []string
-    for i, stats := range inventories {
-        // Попытка получить имя пользователя
-        user, err := s.User(stats.UserID)
-        username := "Неизвестный"
-        if err == nil {
-            username = user.Username
-        } else {
-            log.Printf("Error fetching username for user %s: %v", stats.UserID, err)
-        }
-        lines = append(lines, fmt.Sprintf("%d. **%s** - 💰 %d (Редких: %d)", i+1, username, stats.TotalValue, stats.RareCount))
-    }
+	// Формируем список
+	var lines []string
+	for i, stats := range inventories {
+		// Попытка получить имя пользователя
+		user, err := s.User(stats.UserID)
+		username := "Неизвестный"
+		if err == nil {
+			username = user.Username
+		} else {
+			log.Printf("Error fetching username for user %s: %v", stats.UserID, err)
+		}
+		lines = append(lines, fmt.Sprintf("%d. **%s** - 💰 %d (Редких: %d)", i+1, username, stats.TotalValue, stats.RareCount))
+	}
 
-    embed := &discordgo.MessageEmbed{
-        Title:       "🏆 **Топ-10 богатых инвентарей** ══════",
-        Description: strings.Join(lines, "\n"),
-        Color:       0xFFD700,
-        Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Вызвал: %s | Славь Императора! 👑", m.Author.Username)},
-    }
-    _, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
-    if err != nil {
-        log.Printf("Error sending top inventories embed: %v", err)
-        s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка отображения топа!**")
-    } else {
-        log.Printf("Top inventories sent successfully")
-    }
+	embed := &discordgo.MessageEmbed{
+		Title:       "🏆 **Топ-10 богатых инвентарей** ══════",
+		Description: strings.Join(lines, "\n"),
+		Color:       0xFFD700,
+		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Вызвал: %s | Славь Императора! 👑", m.Author.Username)},
+	}
+	_, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	if err != nil {
+		log.Printf("Error sending top inventories embed: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка отображения топа!**")
+	} else {
+		log.Printf("Top inventories sent successfully")
+	}
 }

@@ -29,7 +29,7 @@ func (r *Ranking) HandleDuelCommand(s *discordgo.Session, m *discordgo.MessageCr
 
 	parts := strings.Fields(command)
 	if len(parts) != 2 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!duel <сумма>`")
+		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `/duel <сумма>`")
 		return
 	}
 

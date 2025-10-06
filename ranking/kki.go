@@ -283,7 +283,7 @@ func (r *Ranking) HandleBitcoinPriceCommand(s *discordgo.Session, m *discordgo.M
 func (r *Ranking) HandlePriceStatsCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	// Добавляем проверку на загруженные NFT
 	if len(r.Kki.nfts) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "❌ **NFT не загружены! Используйте !sync_nfts**")
+		s.ChannelMessageSend(m.ChannelID, "❌ **NFT не загружены! Используйте /sync_nfts**")
 		return
 	}
 

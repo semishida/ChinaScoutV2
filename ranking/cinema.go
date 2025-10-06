@@ -77,7 +77,7 @@ func (r *Ranking) HandleCinemaCommand(s *discordgo.Session, m *discordgo.Message
 			Description: "❌ Неверный формат команды",
 			Color:       0xFF0000,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Использование", Value: "`!cinema <название> <сумма>`\nПример: `!cinema Аватар 100`", Inline: false},
+				{Name: "Использование", Value: "`/cinema <название> <сумма>`\nПример: `/cinema Аватар 100`", Inline: false},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp: time.Now().Format(time.RFC3339),
@@ -248,7 +248,7 @@ func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.Mess
 			Description: "❌ Неверный формат команды",
 			Color:       0xFF0000,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Использование", Value: "`!betcinema <номер> <сумма>`\nПример: `!betcinema 1 50`", Inline: false},
+				{Name: "Использование", Value: "`/betcinema <номер> <сумма>`\nПример: `/betcinema 1 50`", Inline: false},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp: time.Now().Format(time.RFC3339),
@@ -816,7 +816,7 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 	defer r.mu.Unlock()
 
 	if len(r.cinemaOptions) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "🎥 **Список фильмов пуст**\nИспользуй `!cinema <название> <сумма>` чтобы добавить первый фильм!")
+		s.ChannelMessageSend(m.ChannelID, "🎥 **Список фильмов пуст**\nИспользуй `/cinema <название> <сумма>` чтобы добавить первый фильм!")
 		return
 	}
 
@@ -855,9 +855,9 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 	}
 
 	builder.WriteString("\n📋 **Команды:**\n")
-	builder.WriteString("• `!betcinema <номер> <сумма>` - Ставка на фильм\n")
-	builder.WriteString("• `!cinema <название> <сумма>` - Добавить новый фильм\n")
-	builder.WriteString("• `!cinemalist` - Обновить список\n")
+	builder.WriteString("• `/betcinema <номер> <сумма>` - Ставка на фильм\n")
+	builder.WriteString("• `/cinema <название> <сумма>` - Добавить новый фильм\n")
+	builder.WriteString("• `/cinemalist` - Обновить список\n")
 
 	// Отправляем как обычное текстовое сообщение
 	if _, err := s.ChannelMessageSend(m.ChannelID, builder.String()); err != nil {
@@ -868,7 +868,7 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 			log.Printf("Сообщение слишком длинное, разбиваем на части")
 
 			// Первая часть - топ фильмов
-			part1 := fmt.Sprintf("🎬 **ТОП ФИЛЬМОВ** 🎬\n\n")
+			part1 := "🎬 **ТОП ФИЛЬМОВ** 🎬\n\n"
 			for i := 0; i < len(sortedOptions)/2 && i < 20; i++ {
 				option := sortedOptions[i]
 				filmName := option.Name
@@ -896,7 +896,7 @@ func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.Mes
 				}
 				part2 += fmt.Sprintf("🎬 **%d. %s** - `%d`\n", i+1, filmName, option.Total)
 			}
-			part2 += "\n📋 **Команды:**\n• `!betcinema <номер> <сумма>`\n• `!cinema <название> <сумма>`\n• `!cinemalist`"
+			part2 += "\n📋 **Команды:**\n• `/betcinema <номер> <сумма>`\n• `/cinema <название> <сумма>`\n• `/cinemalist`"
 
 			s.ChannelMessageSend(m.ChannelID, part1)
 			time.Sleep(300 * time.Millisecond)
@@ -1052,7 +1052,7 @@ func (r *Ranking) HandleRemoveLowestCommand(s *discordgo.Session, m *discordgo.M
 			Description: "❌ Неверный формат команды",
 			Color:       0xFF0000,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Использование", Value: "`!removelowest <число>`\nПример: `!removelowest 2`", Inline: false},
+				{Name: "Использование", Value: "`/removelowest <число>`\nПример: `/removelowest 2`", Inline: false},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp: time.Now().Format(time.RFC3339),
@@ -1210,7 +1210,7 @@ func (r *Ranking) HandleAdjustCinemaCommand(s *discordgo.Session, m *discordgo.M
 			Description: "❌ Неверный формат команды",
 			Color:       0xFF0000,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Использование", Value: "`!adjustcinema <номер> <+/-сумма>`\nПример: `!adjustcinema 1 +100`", Inline: false},
+				{Name: "Использование", Value: "`/adjustcinema <номер> <+/-сумма>`\nПример: `/adjustcinema 1 +100`", Inline: false},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp: time.Now().Format(time.RFC3339),
@@ -1415,7 +1415,7 @@ func (r *Ranking) HandleRemoveCinemaCommand(s *discordgo.Session, m *discordgo.M
 			Description: "❌ Неверный формат команды",
 			Color:       0xFF0000,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Использование", Value: "`!removecinema <номер>`\nПример: `!removecinema 1`", Inline: false},
+				{Name: "Использование", Value: "`/removecinema <номер>`\nПример: `/removecinema 1`", Inline: false},
 			},
 			Footer:    &discordgo.MessageEmbedFooter{Text: "Киноаукцион 🎬"},
 			Timestamp: time.Now().Format(time.RFC3339),

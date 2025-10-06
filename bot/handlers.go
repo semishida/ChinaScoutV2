@@ -30,7 +30,7 @@ func Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayCha
 			return
 		}
 
-		if m.ChannelID == floodChannelID && strings.HasPrefix(m.Content, "!") {
+		if m.ChannelID == floodChannelID && strings.HasPrefix(m.Content, "/") {
 			log.Printf("Received command: %s from %s in flood channel", m.Content, m.Author.ID)
 			handleCommands(s, m, rank)
 			return
@@ -280,184 +280,184 @@ func handleCommands(s *discordgo.Session, m *discordgo.MessageCreate, rank *rank
 	command := strings.TrimSpace(strings.ToLower(m.Content))
 	log.Printf("Processing command: %s from %s", command, m.Author.ID)
 	switch {
-	case strings.HasPrefix(command, "!cpoll"):
-		log.Printf("Matched !cpoll")
+	case strings.HasPrefix(command, "/cpoll"):
+		log.Printf("Matched /cpoll")
 		rank.HandlePollCommand(s, m, m.Content)
-	case strings.HasPrefix(command, "!dep"):
-		log.Printf("Matched !dep")
+	case strings.HasPrefix(command, "/dep"):
+		log.Printf("Matched /dep")
 		rank.HandleDepCommand(s, m, m.Content)
-	case strings.HasPrefix(command, "!closedep"):
-		log.Printf("Matched !closedep")
+	case strings.HasPrefix(command, "/closedep"):
+		log.Printf("Matched /closedep")
 		rank.HandleCloseDepCommand(s, m, m.Content)
-	case command == "!top5" || command == "!top":
-		log.Printf("Matched !top")
+	case command == "/top5" || command == "/top":
+		log.Printf("Matched /top")
 		rank.HandleTopCommand(s, m)
-	case command == "!polls":
-		log.Printf("Matched !polls")
+	case command == "/polls":
+		log.Printf("Matched /polls")
 		rank.HandlePollsCommand(s, m)
-	case command == "!rb":
-		log.Printf("Matched !rb, calling StartRBGame")
+	case command == "/rb":
+		log.Printf("Matched /rb, calling StartRBGame")
 		rank.StartRBGame(s, m)
-	case strings.HasPrefix(command, "!rb "):
-		log.Printf("Matched !rb with arguments, calling HandleRBCommand")
+	case strings.HasPrefix(command, "/rb "):
+		log.Printf("Matched /rb with arguments, calling HandleRBCommand")
 		rank.HandleRBCommand(s, m, m.Content)
-	case command == "!blackjack":
-		log.Printf("Matched !blackjack")
+	case command == "/blackjack":
+		log.Printf("Matched /blackjack")
 		rank.StartBlackjackGame(s, m)
-	case strings.HasPrefix(command, "!blackjack "):
-		log.Printf("Matched !blackjack with arguments")
+	case strings.HasPrefix(command, "/blackjack "):
+		log.Printf("Matched /blackjack with arguments")
 		rank.HandleBlackjackBet(s, m, m.Content)
-	case strings.HasPrefix(command, "!endblackjack"):
-		log.Printf("Matched !endblackjack")
+	case strings.HasPrefix(command, "/endblackjack"):
+		log.Printf("Matched /endblackjack")
 		rank.HandleEndBlackjackCommand(s, m, m.Content)
-	case strings.HasPrefix(command, "!duel"):
-		log.Printf("Matched !duel")
+	case strings.HasPrefix(command, "/duel"):
+		log.Printf("Matched /duel")
 		rank.HandleDuelCommand(s, m, m.Content)
-	case strings.HasPrefix(command, "!stats"):
-		log.Printf("Matched !stats")
+	case strings.HasPrefix(command, "/stats"):
+		log.Printf("Matched /stats")
 		rank.HandleStatsCommand(s, m)
-	case strings.HasPrefix(command, "!adminmass"):
-		log.Printf("Matched !adminmass")
+	case strings.HasPrefix(command, "/adminmass"):
+		log.Printf("Matched /adminmass")
 		rank.HandleAdminMassCommand(s, m, m.Content)
-	case command == "!admincinemalist":
-		log.Printf("Matched !admincinemalist")
+	case command == "/admincinemalist":
+		log.Printf("Matched /admincinemalist")
 		rank.HandleAdminCinemaListCommand(s, m)
-	case strings.HasPrefix(command, "!removelowest "):
-		log.Printf("Matched !removelowest")
+	case strings.HasPrefix(command, "/removelowest "):
+		log.Printf("Matched /removelowest")
 		rank.HandleRemoveLowestCommand(s, m, command)
-	case strings.HasPrefix(command, "!adjustcinema "):
-		log.Printf("Matched !adjustcinema")
+	case strings.HasPrefix(command, "/adjustcinema "):
+		log.Printf("Matched /adjustcinema")
 		rank.HandleAdjustCinemaCommand(s, m, command)
-	case strings.HasPrefix(command, "!cinema "):
-		log.Printf("Matched !cinema")
+	case strings.HasPrefix(command, "/cinema "):
+		log.Printf("Matched /cinema")
 		rank.HandleCinemaCommand(s, m, command)
-	case strings.HasPrefix(command, "!betcinema "):
-		log.Printf("Matched !betcinema")
+	case strings.HasPrefix(command, "/betcinema "):
+		log.Printf("Matched /betcinema")
 		rank.HandleBetCinemaCommand(s, m, command)
-	case command == "!cinemalist":
-		log.Printf("Matched !cinemalist")
+	case command == "/cinemalist":
+		log.Printf("Matched /cinemalist")
 		rank.HandleCinemaListCommand(s, m)
-	case strings.HasPrefix(command, "!admin"):
-		log.Printf("Matched !admin")
+	case strings.HasPrefix(command, "/admin"):
+		log.Printf("Matched /admin")
 		rank.HandleAdminCommand(s, m, m.Content)
-	case command == "!chelp":
-		log.Printf("Matched !chelp")
+	case command == "/chelp":
+		log.Printf("Matched /chelp")
 		rank.HandleChelpCommand(s, m)
-	case command == "!china":
-		log.Printf("Matched !china")
+	case command == "/china":
+		log.Printf("Matched /china")
 		rank.HandleChinaCommand(s, m)
-	case strings.HasPrefix(command, "!transfer"):
-		log.Printf("Matched !transfer")
+	case strings.HasPrefix(command, "/transfer"):
+		log.Printf("Matched /transfer")
 		rank.HandleTransferCommand(s, m, m.Content)
-	case strings.HasPrefix(command, "!removecinema "):
-		log.Printf("Matched !removecinema")
+	case strings.HasPrefix(command, "/removecinema "):
+		log.Printf("Matched /removecinema")
 		rank.HandleRemoveCinemaCommand(s, m, command)
-	case strings.HasPrefix(command, "!sync_nfts"):
+	case strings.HasPrefix(command, "/sync_nfts"):
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !sync_nfts")
+		log.Printf("Matched /sync_nfts")
 		err := rank.Kki.SyncFromSheets(rank)
 		if err != nil {
 			s.ChannelMessageSend(m.ChannelID, "❌ **Ошибка синхронизации**: "+err.Error())
 		} else {
 			s.ChannelMessageSend(m.ChannelID, "✅ **NFT и кейсы синхронизированы из Google Sheets!**")
 		}
-	case command == "!inventory":
-		log.Printf("Matched !inventory")
+	case command == "/inventory":
+		log.Printf("Matched /inventory")
 		rank.HandleInventoryCommand(s, m)
-	case command == "!sell_duplicates":
-		log.Printf("Matched !sell_duplicates")
+	case command == "/sell_duplicates":
+		log.Printf("Matched /sell_duplicates")
 		rank.HandleSellDuplicatesCommand(s, m)
-	case command == "!top_inventories":
-		log.Printf("Matched !top_inventories")
+	case command == "/top_inventories":
+		log.Printf("Matched /top_inventories")
 		rank.HandleTopInventoriesCommand(s, m)
-	case command == "!case_inventory":
-		log.Printf("Matched !case_inventory")
+	case command == "/case_inventory":
+		log.Printf("Matched /case_inventory")
 		rank.HandleCaseInventoryCommand(s, m)
-	case strings.HasPrefix(command, "!sell "):
-		log.Printf("Matched !sell")
+	case strings.HasPrefix(command, "/sell "):
+		log.Printf("Matched /sell")
 		rank.HandleSellCommand(s, m, command)
-	case strings.HasPrefix(command, "!trade_nft "):
-		log.Printf("Matched !trade_nft")
+	case strings.HasPrefix(command, "/trade_nft "):
+		log.Printf("Matched /trade_nft")
 		rank.HandleTradeNFTCommand(s, m, command)
-	case strings.HasPrefix(command, "!open_case "):
-		log.Printf("Matched !open_case")
+	case strings.HasPrefix(command, "/open_case "):
+		log.Printf("Matched /open_case")
 		rank.HandleOpenCaseCommand(s, m, command)
-	case command == "!daily_case":
-		log.Printf("Matched !daily_case")
+	case command == "/daily_case":
+		log.Printf("Matched /daily_case")
 		rank.HandleDailyCaseCommand(s, m)
-	case strings.HasPrefix(command, "!case_trade "):
-		log.Printf("Matched !case_trade")
+	case strings.HasPrefix(command, "/case_trade "):
+		log.Printf("Matched /case_trade")
 		rank.HandleCaseTradeCommand(s, m, command)
-	case strings.HasPrefix(command, "!a_give_case "):
+	case strings.HasPrefix(command, "/a_give_case "):
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !a_give_case")
+		log.Printf("Matched /a_give_case")
 		rank.HandleAdminGiveCase(s, m, command)
-	case strings.HasPrefix(command, "!a_give_nft "):
+	case strings.HasPrefix(command, "/a_give_nft "):
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !a_give_nft")
+		log.Printf("Matched /a_give_nft")
 		rank.HandleAdminGiveNFT(s, m, command)
-	case strings.HasPrefix(command, "!a_remove_nft "):
+	case strings.HasPrefix(command, "/a_remove_nft "):
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !a_remove_nft")
+		log.Printf("Matched /a_remove_nft")
 		rank.HandleAdminRemoveNFT(s, m, command)
-	case strings.HasPrefix(command, "!a_holiday_case "):
+	case strings.HasPrefix(command, "/a_holiday_case "):
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !a_holiday_case")
+		log.Printf("Matched /a_holiday_case")
 		rank.HandleAdminHolidayCase(s, m, command)
-	case strings.HasPrefix(command, "!a_give_holiday_case_all "):
+	case strings.HasPrefix(command, "/a_give_holiday_case_all "):
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !a_give_holiday_case_all")
+		log.Printf("Matched /a_give_holiday_case_all")
 		rank.HandleAdminGiveHolidayCaseAll(s, m, command)
-	case command == "!case_help":
-		log.Printf("Matched !case_help")
+	case command == "/case_help":
+		log.Printf("Matched /case_help")
 		rank.HandleCaseHelpCommand(s, m)
-	case strings.HasPrefix(command, "!show_nft "):
-		log.Printf("Matched !show_nft")
+	case strings.HasPrefix(command, "/show_nft "):
+		log.Printf("Matched /show_nft")
 		rank.HandleShowNFTCommand(s, m, command)
-	case strings.HasPrefix(command, "!nft_show "):
-		log.Printf("Matched !nft_show")
+	case strings.HasPrefix(command, "/nft_show "):
+		log.Printf("Matched /nft_show")
 		rank.HandleShowNFTCommand(s, m, command)
-	case command == "!test_clear_all_nfts":
+	case command == "/test_clear_all_nfts":
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !test_clear_all_nfts")
+		log.Printf("Matched /test_clear_all_nfts")
 		rank.ClearAllUserNFTs(s, m)
-	case command == "!case_bank":
-		log.Printf("Matched !case_bank")
+	case command == "/case_bank":
+		log.Printf("Matched /case_bank")
 		rank.HandleCaseBankCommand(s, m)
-	case strings.HasPrefix(command, "!buy_case_bank "):
-		log.Printf("Matched !buy_case_bank")
+	case strings.HasPrefix(command, "/buy_case_bank "):
+		log.Printf("Matched /buy_case_bank")
 		rank.HandleBuyCaseBankCommand(s, m, command)
-	case command == "!a_reset_case_limits":
+	case command == "/a_reset_case_limits":
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !a_reset_case_limits")
+		log.Printf("Matched /a_reset_case_limits")
 		rank.HandleResetCaseLimitsCommand(s, m)
-	case command == "!btc":
-		log.Printf("Matched !btc")
+	case command == "/btc":
+		log.Printf("Matched /btc")
 		rank.HandleBitcoinPriceCommand(s, m)
-	case command == "!prices":
-		log.Printf("Matched !prices")
+	case command == "/prices":
+		log.Printf("Matched /prices")
 		rank.HandlePriceStatsCommand(s, m)
-	case command == "!a_refresh_bank":
+	case command == "/a_refresh_bank":
 		if !rank.IsAdmin(m.Author.ID) {
 			return
 		}
-		log.Printf("Matched !a_refresh_bank")
+		log.Printf("Matched /a_refresh_bank")
 		rank.HandleAdminRefreshBankCommand(s, m)
 	default:
 		log.Printf("No match for command: %s", command)

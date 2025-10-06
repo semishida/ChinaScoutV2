@@ -81,7 +81,7 @@ func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCr
 
 	parts := splitCommand(command)
 	if len(parts) < 3 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!cpoll Вопрос [Вариант1] [Вариант2] ...`")
+		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `/cpoll Вопрос [Вариант1] [Вариант2] ...`")
 		return
 	}
 
@@ -131,7 +131,7 @@ func (r *Ranking) HandlePollCommand(s *discordgo.Session, m *discordgo.MessageCr
 	for i, opt := range options {
 		response += fmt.Sprintf("%d. [%s]\n", i+1, opt)
 	}
-	response += fmt.Sprintf("\n💸 Ставьте: `!dep %s <номер_варианта> <сумма>`\n🔒 Закрытие: `!closedep %s <номер>`", pollID, pollID)
+	response += fmt.Sprintf("\n💸 Ставьте: `/dep %s <номер_варианта> <сумма>`\n🔒 Закрытие: `/closedep %s <номер>`", pollID, pollID)
 	s.ChannelMessageSend(m.ChannelID, response)
 	log.Printf("Опрос %s создан %s: %s с вариантами %v", pollID, m.Author.ID, question, options)
 }
@@ -142,7 +142,7 @@ func (r *Ranking) HandleDepCommand(s *discordgo.Session, m *discordgo.MessageCre
 
 	parts := splitCommand(command)
 	if len(parts) != 4 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!dep <ID_опроса> <номер_варианта> <сумма>`")
+		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `/dep <ID_опроса> <номер_варианта> <сумма>`")
 		return
 	}
 
@@ -181,11 +181,7 @@ func (r *Ranking) HandleDepCommand(s *discordgo.Session, m *discordgo.MessageCre
 	}
 
 	r.UpdateRating(m.Author.ID, -amount)
-	if _, exists := poll.Bets[m.Author.ID]; exists {
-		poll.Bets[m.Author.ID] += amount
-	} else {
-		poll.Bets[m.Author.ID] = amount
-	}
+	poll.Bets[m.Author.ID] += amount
 	poll.Choices[m.Author.ID] = option
 	r.mu.Unlock()
 
@@ -193,7 +189,7 @@ func (r *Ranking) HandleDepCommand(s *discordgo.Session, m *discordgo.MessageCre
 	coefficient := coefficients[option-1]
 
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("🎲 <@%s> поставил %d кредитов на [%s] в опросе **%s** 📊\n**📈 Текущий коэффициент:** %.2f", m.Author.ID, amount, poll.Options[option-1], poll.Question, coefficient))
-	r.LogCreditOperation(s, fmt.Sprintf("<@%s> поставил %d соц кредитов на опрос %s", pollID))
+	r.LogCreditOperation(s, fmt.Sprintf("<@%s> поставил %d соц кредитов на опрос %s", m.Author.ID, amount, pollID))
 	log.Printf("Пользователь %s поставил %d на вариант %d в опросе %s, коэффициент: %.2f", m.Author.ID, amount, option, pollID, coefficient)
 }
 
@@ -203,7 +199,7 @@ func (r *Ranking) HandleCloseDepCommand(s *discordgo.Session, m *discordgo.Messa
 
 	parts := strings.Fields(command)
 	if len(parts) != 3 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!closedep <ID_опроса> <номер_победившего_варианта>`")
+		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `/closedep <ID_опроса> <номер_победившего_варианта>`")
 		return
 	}
 
@@ -286,7 +282,7 @@ func (r *Ranking) HandlePollsCommand(s *discordgo.Session, m *discordgo.MessageC
 	defer r.mu.Unlock()
 
 	if len(r.polls) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "📊 Нет активных опросов! Создай новый с помощью `!cpoll`! 🎉")
+		s.ChannelMessageSend(m.ChannelID, "📊 Нет активных опросов! Создай новый с помощью `/cpoll`! 🎉")
 		return
 	}
 

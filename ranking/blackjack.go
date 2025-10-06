@@ -49,7 +49,7 @@ func (r *Ranking) StartBlackjackGame(s *discordgo.Session, m *discordgo.MessageC
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "♠️ Казино: Блэкджек 🎰",
-		Description: fmt.Sprintf("Добро пожаловать, <@%s>! 🎉\nСделай ставку, чтобы начать игру.\n\n**💰 Твой баланс:** %d кредитов\n\nНапиши: `!blackjack <сумма>`", m.Author.ID, r.GetRating(m.Author.ID)),
+		Description: fmt.Sprintf("Добро пожаловать, <@%s>! 🎉\nСделай ставку, чтобы начать игру.\n\n**💰 Твой баланс:** %d кредитов\n\nНапиши: `/blackjack <сумма>`", m.Author.ID, r.GetRating(m.Author.ID)),
 		Color:       color,
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "Играй с умом! 🍀",
@@ -72,7 +72,7 @@ func (r *Ranking) StartBlackjackGame(s *discordgo.Session, m *discordgo.MessageC
 func (r *Ranking) HandleBlackjackBet(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	parts := strings.Fields(command)
 	if len(parts) != 2 {
-		r.sendTemporaryReply(s, m, "❌ Используй: `!blackjack <сумма>`\nПример: `!blackjack 50`")
+		r.sendTemporaryReply(s, m, "❌ Используй: `/blackjack <сумма>`\nПример: `/blackjack 50`")
 		return
 	}
 
@@ -97,7 +97,7 @@ func (r *Ranking) HandleBlackjackBet(s *discordgo.Session, m *discordgo.MessageC
 		}
 	}
 	if game == nil {
-		r.sendTemporaryReply(s, m, "❌ Начни игру с помощью `!blackjack`!")
+		r.sendTemporaryReply(s, m, "❌ Начни игру с помощью `/blackjack`!")
 		r.mu.Unlock()
 		return
 	}
@@ -386,7 +386,7 @@ func (r *Ranking) HandleBlackjackReplay(s *discordgo.Session, i *discordgo.Inter
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "♠️ Казино: Блэкджек 🎰",
-		Description: fmt.Sprintf("Добро пожаловать, <@%s>! 🎉\nСделай ставку, чтобы начать игру.\n\n**💰 Твой баланс:** %d кредитов\n\nНапиши: `!blackjack <сумма>`", playerID, r.GetRating(playerID)),
+		Description: fmt.Sprintf("Добро пожаловать, <@%s>! 🎉\nСделай ставку, чтобы начать игру.\n\n**💰 Твой баланс:** %d кредитов\n\nНапиши: `/blackjack <сумма>`", playerID, r.GetRating(playerID)),
 		Color:       newColor,
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "Играй с умом! 🍀",
@@ -419,7 +419,7 @@ func (r *Ranking) HandleEndBlackjackCommand(s *discordgo.Session, m *discordgo.M
 
 	parts := strings.Fields(command)
 	if len(parts) != 2 {
-		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `!endblackjack @id`")
+		s.ChannelMessageSend(m.ChannelID, "❌ Используй: `/endblackjack @id`")
 		return
 	}
 

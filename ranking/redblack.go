@@ -40,7 +40,7 @@ func (r *Ranking) StartRBGame(s *discordgo.Session, m *discordgo.MessageCreate) 
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "🎰 Игра: Красный-Чёрный",
-		Description: fmt.Sprintf("Велком, <@%s>! 🥳\nИмператор велит: выбирать цвет и ставка делай!\n\n**💰 Баланса твоя:** %d кредитов\n\nПиши вот: `!rb <red/black> <сумма>`\nНапример: `!rb red 50`\nИмператор следит за тобой! 👑", m.Author.ID, r.GetRating(m.Author.ID)),
+		Description: fmt.Sprintf("Велком, <@%s>! 🥳\nИмператор велит: выбирать цвет и ставка делай!\n\n**💰 Баланса твоя:** %d кредитов\n\nПиши вот: `/rb <red/black> <сумма>`\nНапример: `/rb red 50`\nИмператор следит за тобой! 👑", m.Author.ID, r.GetRating(m.Author.ID)),
 		Color:       color,
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "Славь Императора и везёт тебе! 🍀",
@@ -83,7 +83,7 @@ func (r *Ranking) StartRBGame(s *discordgo.Session, m *discordgo.MessageCreate) 
 func (r *Ranking) HandleRBCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string) {
 	parts := strings.Fields(command)
 	if len(parts) < 3 {
-		r.sendTemporaryReply(s, m, "❌ Пиши правильно: `!rb <red/black> <сумма>`")
+		r.sendTemporaryReply(s, m, "❌ Пиши правильно: `/rb <red/black> <сумма>`")
 		return
 	}
 
@@ -114,7 +114,7 @@ func (r *Ranking) HandleRBCommand(s *discordgo.Session, m *discordgo.MessageCrea
 		}
 	}
 	if game == nil {
-		r.sendTemporaryReply(s, m, "❌ Игру начинай с `!rb`! Император ждёт тебя! 👑")
+		r.sendTemporaryReply(s, m, "❌ Игру начинай с `/rb`! Император ждёт тебя! 👑")
 		r.mu.Unlock()
 		return
 	}
@@ -293,7 +293,7 @@ func (r *Ranking) HandleRBReplay(s *discordgo.Session, i *discordgo.InteractionC
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "🎰 Игра: Красный-Чёрный",
-		Description: fmt.Sprintf("Велком снова, <@%s>! 🥳\nИмператор даёт шанс: выбирать цвет и ставка делай!\n\n**💰 Баланса твоя:** %d кредитов\n\nПиши вот: `!rb <red/black> <сумма>`\nНапример: `!rb red 50`\nИмператор следит за тобой! 👑", playerID, r.GetRating(playerID)),
+		Description: fmt.Sprintf("Велком снова, <@%s>! 🥳\nИмператор даёт шанс: выбирать цвет и ставка делай!\n\n**💰 Баланса твоя:** %d кредитов\n\nПиши вот: `/rb <red/black> <сумма>`\nНапример: `/rb red 50`\nИмператор следит за тобой! 👑", playerID, r.GetRating(playerID)),
 		Color:       newColor,
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "Славь Императора и везёт тебе! 🍀",
