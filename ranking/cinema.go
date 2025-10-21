@@ -200,7 +200,6 @@ func (r *Ranking) HandleCinemaCommand(s *discordgo.Session, m *discordgo.Message
 	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
 		Embed:      embed,
 		Components: components,
-		Reference:  m.Reference(),
 	})
 	if err != nil {
 		log.Printf("Ошибка отправки сообщения юзеру: %v", err)
@@ -403,7 +402,6 @@ func (r *Ranking) HandleBetCinemaCommand(s *discordgo.Session, m *discordgo.Mess
 	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
 		Embed:      embed,
 		Components: components,
-		Reference:  m.Reference(),
 	})
 	if err != nil {
 		log.Printf("Ошибка отправки сообщения юзеру: %v", err)
@@ -811,100 +809,98 @@ func (r *Ranking) HandleCinemaButton(s *discordgo.Session, i *discordgo.Interact
 }
 
 func (r *Ranking) HandleCinemaListCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
-	log.Printf("Начало обработки !cinemalist для пользователя %s", m.Author.ID)
-	r.mu.Lock()
-	defer r.mu.Unlock()
+    log.Printf("Начало обработки !cinemalist для пользователя %s", m.Author.ID)
+    r.mu.Lock()
+    defer r.mu.Unlock()
 
-	if len(r.cinemaOptions) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "🎥 **Список фильмов пуст**\nИспользуй `!cinema <название> <сумма>` чтобы добавить первый фильм!")
-		return
-	}
+    if len(r.cinemaOptions) == 0 {
+        s.ChannelMessageSend(m.ChannelID, "🎥 **Список фильмов пуст**\nИспользуй `!cinema <название> <сумма>` чтобы добавить первый фильм!")
+        return
+    }
 
-	log.Printf("Формирование таблицы для %d фильмов", len(r.cinemaOptions))
+    log.Printf("Формирование таблицы для %d фильмов", len(r.cinemaOptions))
 
-	// Создаем копию для сортировки
-	sortedOptions := make([]CinemaOption, len(r.cinemaOptions))
-	copy(sortedOptions, r.cinemaOptions)
+    // Создаем копию для сортировки
+    sortedOptions := make([]CinemaOption, len(r.cinemaOptions))
+    copy(sortedOptions, r.cinemaOptions)
 
-	// Сортируем по убыванию (от большего к меньшему)
-	sort.Slice(sortedOptions, func(i, j int) bool {
-		return sortedOptions[i].Total > sortedOptions[j].Total
-	})
+    // Сортируем по убыванию (от большего к меньшему)
+    sort.Slice(sortedOptions, func(i, j int) bool {
+        return sortedOptions[i].Total > sortedOptions[j].Total
+    })
 
-	// Создаем простой текстовый список
-	var builder strings.Builder
-	builder.WriteString("🎬 **ТОП ФИЛЬМОВ** 🎬\n\n")
+    // Создаем простой текстовый список
+    var builder strings.Builder
+    builder.WriteString("🎬 **ТОП ФИЛЬМОВ** 🎬\n\n")
 
-	for i, option := range sortedOptions {
-		filmName := option.Name
-		if filmName == "" {
-			filmName = "Неизвестный фильм"
-		}
+    for i, option := range sortedOptions {
+        filmName := option.Name
+        if filmName == "" {
+            filmName = "Неизвестный фильм"
+        }
 
-		// Добавляем эмодзи для первых трех мест
-		medal := "🎬"
-		if i == 0 {
-			medal = "🥇"
-		} else if i == 1 {
-			medal = "🥈"
-		} else if i == 2 {
-			medal = "🥉"
-		}
+        // Добавляем эмодзи для первых трех мест
+        medal := "🎬"
+        if i == 0 {
+            medal = "🥇"
+        } else if i == 1 {
+            medal = "🥈"
+        } else if i == 2 {
+            medal = "🥉"
+        }
 
-		builder.WriteString(fmt.Sprintf("%s **%d. %s** - `%d кредитов`\n", medal, i+1, filmName, option.Total))
-	}
+        builder.WriteString(fmt.Sprintf("%s **%d. %s** - `%d кредитов`\n", medal, i+1, filmName, option.Total))
+    }
 
-	builder.WriteString("\n📋 **Команды:**\n")
-	builder.WriteString("• `!betcinema <номер> <сумма>` - Ставка на фильм\n")
-	builder.WriteString("• `!cinema <название> <сумма>` - Добавить новый фильм\n")
-	builder.WriteString("• `!cinemalist` - Обновить список\n")
+    builder.WriteString("\n📋 **Команды:**\n")
+    builder.WriteString("• `!betcinema <номер> <сумма>` - Ставка на фильм\n")
+    builder.WriteString("• `!cinema <название> <сумма>` - Добавить новый фильм\n")
+    builder.WriteString("• `!cinemalist` - Обновить список\n")
 
-	// Отправляем как обычное текстовое сообщение
-	if _, err := s.ChannelMessageSend(m.ChannelID, builder.String()); err != nil {
-		log.Printf("Ошибка отправки сообщения для !cinemalist: %v", err)
+    content := builder.String()
 
-		// Если сообщение слишком длинное, разбиваем на части
-		if len(builder.String()) > 2000 {
-			log.Printf("Сообщение слишком длинное, разбиваем на части")
+    // Проверяем длину и разбиваем если нужно
+    if len(content) > 2000 {
+        log.Printf("Сообщение слишком длинное (%d символов), разбиваем на части", len(content))
+        
+        // Разбиваем на части правильно
+        lines := strings.Split(content, "\n")
+        var parts []string
+        currentPart := ""
+        
+        for _, line := range lines {
+            if len(currentPart) + len(line) + 1 > 2000 {
+                parts = append(parts, currentPart)
+                currentPart = line + "\n"
+            } else {
+                currentPart += line + "\n"
+            }
+        }
+        
+        if currentPart != "" {
+            parts = append(parts, currentPart)
+        }
+        
+        // Отправляем части
+        for i, part := range parts {
+            log.Printf("Отправка части %d/%d (%d символов)", i+1, len(parts), len(part))
+            if i == 0 {
+                // Первая часть с заголовком
+                part = "🎬 **ТОП ФИЛЬМОВ** 🎬\n\n" + part
+            }
+            if _, err := s.ChannelMessageSend(m.ChannelID, part); err != nil {
+                log.Printf("Ошибка отправки части %d: %v", i+1, err)
+            }
+            time.Sleep(300 * time.Millisecond)
+        }
+    } else {
+        // Отправляем как одно сообщение
+        if _, err := s.ChannelMessageSend(m.ChannelID, content); err != nil {
+            log.Printf("Ошибка отправки сообщения для !cinemalist: %v", err)
+        }
+    }
 
-			// Первая часть - топ фильмов
-			part1 := fmt.Sprintf("🎬 **ТОП ФИЛЬМОВ** 🎬\n\n")
-			for i := 0; i < len(sortedOptions)/2 && i < 20; i++ {
-				option := sortedOptions[i]
-				filmName := option.Name
-				if filmName == "" {
-					filmName = "Неизвестный фильм"
-				}
-				medal := "🎬"
-				if i == 0 {
-					medal = "🥇"
-				} else if i == 1 {
-					medal = "🥈"
-				} else if i == 2 {
-					medal = "🥉"
-				}
-				part1 += fmt.Sprintf("%s **%d. %s** - `%d`\n", medal, i+1, filmName, option.Total)
-			}
-
-			// Вторая часть - остальные фильмы и команды
-			part2 := ""
-			for i := len(sortedOptions) / 2; i < len(sortedOptions); i++ {
-				option := sortedOptions[i]
-				filmName := option.Name
-				if filmName == "" {
-					filmName = "Неизвестный фильм"
-				}
-				part2 += fmt.Sprintf("🎬 **%d. %s** - `%d`\n", i+1, filmName, option.Total)
-			}
-			part2 += "\n📋 **Команды:**\n• `!betcinema <номер> <сумма>`\n• `!cinema <название> <сумма>`\n• `!cinemalist`"
-
-			s.ChannelMessageSend(m.ChannelID, part1)
-			time.Sleep(300 * time.Millisecond)
-			s.ChannelMessageSend(m.ChannelID, part2)
-		}
-	}
-
-	log.Printf("Завершение обработки !cinemalist")
+    log.Printf("Завершение обработки !cinemalist")
 }
 func (r *Ranking) HandleAdminCinemaListCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	log.Printf("Начало обработки !admincinemalist для пользователя %s", m.Author.ID)
