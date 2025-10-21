@@ -4,10 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/go-redis/redis/v8"
