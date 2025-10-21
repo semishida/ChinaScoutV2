@@ -122,7 +122,27 @@ func (r *Ranking) RegisterSlashCommands(s *discordgo.Session, guildID string) er
 				},
 			},
 		},
-	}
+		// В функцию RegisterSlashCommands добавь эту команду:
+{
+    Name:        "buy_case_bank",
+    Description: "Купить кейс из банка",
+    Options: []*discordgo.ApplicationCommandOption{
+        {
+            Type:        discordgo.ApplicationCommandOptionString,
+            Name:        "case_id",
+            Description: "ID кейса для покупки",
+            Required:    true,
+        },
+        {
+            Type:        discordgo.ApplicationCommandOptionInteger,
+            Name:        "count",
+            Description: "Количество кейсов",
+            Required:    true,
+            MinValue:    &[]float64{1}[0],
+            MaxValue:    100,
+        },
+    },
+},
 
 	// Регистрируем команды для гильдии
 	for _, cmd := range commands {
@@ -139,15 +159,31 @@ func (r *Ranking) RegisterSlashCommands(s *discordgo.Session, guildID string) er
 // HandleSlashCommand обрабатывает все слэш-команды
 func (r *Ranking) HandleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	data := i.ApplicationCommandData()
-	
-	// Отложенный ответ (обязательно для слэш-команд)
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-	})
-	if err != nil {
-		log.Printf("Ошибка отложенного ответа: %v", err)
-		return
-	}
+    
+    // Сначала проверяем, существует ли команда
+    switch data.Name {
+    case "china", "top", "stats", "transfer", "inventory", "case_inventory", 
+         "btc", "prices", "case_bank", "daily_case", "chelp", "case_help", 
+         "admin", "buy_case_bank": // ← добавил buy_case_bank
+        // Это известная команда - отправляем отложенный ответ
+        err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+            Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+        })
+        if err != nil {
+            log.Printf("Ошибка отложенного ответа: %v", err)
+            return
+        }
+    default:
+        // Неизвестная команда - отвечаем сразу
+        content := "❌ Неизвестная команда! Используйте `/chelp` для списка команд."
+        s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+            Type: discordgo.InteractionResponseChannelMessageWithSource,
+            Data: &discordgo.InteractionResponseData{
+                Content: content,
+            },
+        })
+        return
+    }
 
 	switch data.Name {
 	case "china":
@@ -170,6 +206,8 @@ func (r *Ranking) HandleSlashCommand(s *discordgo.Session, i *discordgo.Interact
 		r.handleSlashCaseBank(s, i)
 	case "daily_case":
 		r.handleSlashDailyCase(s, i)
+	case "buy_case_bank":
+    	r.handleSlashBuyCaseBank(s, i)
 	case "chelp":
 		r.handleSlashChelp(s, i)
 	case "case_help":
@@ -556,4 +594,32 @@ func (r *Ranking) formatReasonForSlash(reason string) string {
 		return ""
 	}
 	return fmt.Sprintf(" (причина: %s)", reason)
+}
+
+// handleSlashBuyCaseBank обработчик команды /buy_case_bank
+func (r *Ranking) handleSlashBuyCaseBank(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    data := i.ApplicationCommandData()
+    options := data.Options
+    
+    caseID := options[0].StringValue()
+    count := int(options[1].IntValue())
+
+    // Создаем фейковую команду для старого обработчика
+    command := fmt.Sprintf("!buy_case_bank %s %d", caseID, count)
+    
+    fakeMsg := &discordgo.MessageCreate{
+        Message: &discordgo.Message{
+            ChannelID: i.ChannelID,
+            Author: &discordgo.User{
+                ID:       i.Member.User.ID,
+                Username: i.Member.User.Username,
+            },
+            Content: command,
+        },
+    }
+    
+    // Вызываем старый обработчик
+    r.HandleBuyCaseBankCommand(s, fakeMsg, command)
+    
+    log.Printf("Slash command /buy_case_bank executed by %s", i.Member.User.Username)
 }
