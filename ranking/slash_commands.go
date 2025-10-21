@@ -161,10 +161,15 @@ func (r *Ranking) HandleSlashCommand(s *discordgo.Session, i *discordgo.Interact
     data := i.ApplicationCommandData()
     
     // Сначала проверяем, существует ли команда
-    switch data.Name {
-    case "china", "top", "stats", "transfer", "inventory", "case_inventory", 
-         "btc", "prices", "case_bank", "daily_case", "chelp", "case_help", 
-         "admin", "buy_case_bank": // ← добавил buy_case_bank
+    knownCommands := map[string]bool{
+        "china": true, "top": true, "stats": true, "transfer": true, 
+        "inventory": true, "case_inventory": true, "btc": true, 
+        "prices": true, "case_bank": true, "daily_case": true, 
+        "chelp": true, "case_help": true, "admin": true, 
+        "buy_case_bank": true,
+    }
+    
+    if knownCommands[data.Name] {
         // Это известная команда - отправляем отложенный ответ
         err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
             Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
@@ -173,7 +178,7 @@ func (r *Ranking) HandleSlashCommand(s *discordgo.Session, i *discordgo.Interact
             log.Printf("Ошибка отложенного ответа: %v", err)
             return
         }
-    default:
+    } else {
         // Неизвестная команда - отвечаем сразу
         content := "❌ Неизвестная команда! Используйте `/chelp` для списка команд."
         s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -213,7 +218,7 @@ func (r *Ranking) HandleSlashCommand(s *discordgo.Session, i *discordgo.Interact
         r.handleSlashCaseHelp(s, i)
     case "admin":
         r.handleSlashAdmin(s, i)
-    case "buy_case_bank": // ← добавил обработчик
+    case "buy_case_bank":
         r.handleSlashBuyCaseBank(s, i)
     }
 }
