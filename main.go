@@ -34,9 +34,11 @@ func main() {
 	if telegramChatID == "" {
 		log.Fatal("TELEGRAM_CHAT_ID is not set")
 	}
-
 	if cinemaChannelID == "" {
 		log.Fatal("CINEMA_CHANNEL_ID is not set")
+	}
+	if guildID == "" {
+		log.Fatal("GUILD_ID is not set in .env file")
 	}
 
 	rank, err := ranking.NewRanking(adminFilePath, redisAddr, floodChannelID, cinemaChannelID)
@@ -44,11 +46,17 @@ func main() {
 		log.Fatalf("Failed to initialize ranking: %v", err)
 	}
 
-	bot.Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayChannelID, rank)
+	// Создаем Discord сессию и регистрируем команды ДО запуска бота
+	dg := bot.SetupDiscord(discordToken, floodChannelID, relayChannelID, rank)
+	
+	// Регистрируем слэш-команды
 	err = rank.RegisterSlashCommands(dg, guildID)
 	if err != nil {
-    	log.Printf("Ошибка регистрации слэш-команд: %v", err)
+		log.Printf("Ошибка регистрации слэш-команд: %v", err)
 	} else {
-    	log.Printf("✅ Слэш-команды зарегистрированы!")
+		log.Printf("✅ Слэш-команды зарегистрированы!")
 	}
+
+	// Запускаем бота
+	bot.Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayChannelID, rank)
 }
