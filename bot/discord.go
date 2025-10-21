@@ -35,6 +35,13 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 
 	log.Println("Discord bot is running.")
 	return dg
+
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    if i.Type == discordgo.InteractionApplicationCommand {
+        log.Printf("Slash command received: %s from %s", i.ApplicationCommandData().Name, i.Member.User.Username)
+        rank.HandleSlashCommand(s, i)
+    }
+	})
 }
 
 func SendFileToDiscord(dg *discordgo.Session, channelID, filePath, caption string) error {

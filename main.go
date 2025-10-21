@@ -23,6 +23,7 @@ func main() {
 	adminFilePath := os.Getenv("ADMIN_FILE_PATH")
 	redisAddr := os.Getenv("REDIS_ADDR")
 	telegramChatID := os.Getenv("TELEGRAM_CHAT_ID")
+	guildID := os.Getenv("GUILD_ID")
 
 	if discordToken == "" {
 		log.Fatal("DISCORD_TOKEN is not set")
@@ -44,4 +45,10 @@ func main() {
 	}
 
 	bot.Start(discordToken, telegramToken, telegramChatID, floodChannelID, relayChannelID, rank)
+	err = rank.RegisterSlashCommands(dg, guildID)
+	if err != nil {
+    	log.Printf("Ошибка регистрации слэш-команд: %v", err)
+	} else {
+    	log.Printf("✅ Слэш-команды зарегистрированы!")
+	}
 }
