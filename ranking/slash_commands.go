@@ -1,12 +1,16 @@
 package ranking
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/go-redis/redis/v8"
 )
 
 // RegisterSlashCommands регистрирует слэш-команды
@@ -196,8 +200,9 @@ func (r *Ranking) handleSlashChina(s *discordgo.Session, i *discordgo.Interactio
 
 	userRating := r.GetRating(userID)
 	
+	content := fmt.Sprintf("💰 %s, баланс: **%d** соцкредитов! 🇨🇳", username, userRating)
 	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content: fmt.Sprintf("💰 %s, баланс: **%d** соцкредитов! 🇨🇳", username, userRating),
+		Content: &content,
 	})
 	if err != nil {
 		log.Printf("Ошибка отправки ответа: %v", err)
@@ -208,8 +213,9 @@ func (r *Ranking) handleSlashChina(s *discordgo.Session, i *discordgo.Interactio
 func (r *Ranking) handleSlashTop(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	topUsers := r.GetTop5()
 	if len(topUsers) == 0 {
+		content := "🏆 Пока нет лидеров! Будь первым! 😎"
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: "🏆 Пока нет лидеров! Будь первым! 😎",
+			Content: &content,
 		})
 		return
 	}
@@ -220,7 +226,7 @@ func (r *Ranking) handleSlashTop(s *discordgo.Session, i *discordgo.InteractionC
 	}
 	
 	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content: response,
+		Content: &response,
 	})
 }
 
@@ -236,33 +242,28 @@ func (r *Ranking) handleSlashStats(s *discordgo.Session, i *discordgo.Interactio
 		targetUsername = targetUser.Username
 	}
 
-	// Используем существующую логику из HandleStatsCommand
-	// Создаем фейковый MessageCreate для совместимости
-	fakeMsg := &discordgo.MessageCreate{
-		Message: &discordgo.Message{
-			ChannelID: i.ChannelID,
-			Author: &discordgo.User{
-				ID:       i.Member.User.ID,
-				Username: i.Member.User.Username,
-			},
-			Content: fmt.Sprintf("!stats <@%s>", targetID),
-		},
-	}
-
-	// Вызываем старый обработчик, но перехватываем вывод
-	// Для простоты сделаем упрощенную версию
 	user := User{ID: targetID}
 	dataStr, err := r.redis.Get(r.ctx, "user:"+targetID).Result()
 	if err == redis.Nil {
+		content := fmt.Sprintf("❌ У пользователя %s нет статистики! 😢", targetUsername)
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: fmt.Sprintf("❌ У пользователя %s нет статистики! 😢", targetUsername),
+			Content: &content,
+		})
+		return
+	}
+
+	if err != nil {
+		content := "❌ Ошибка при загрузке статистики!"
+		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Content: &content,
 		})
 		return
 	}
 
 	if err := json.Unmarshal([]byte(dataStr), &user); err != nil {
+		content := "❌ Ошибка при обработке данных пользователя!"
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: "❌ Ошибка при обработке данных пользователя!",
+			Content: &content,
 		})
 		return
 	}
@@ -295,14 +296,15 @@ func (r *Ranking) handleSlashStats(s *discordgo.Session, i *discordgo.Interactio
 			},
 			{
 				Name:   "🎙 Время в голосовых каналах",
-				Value:  fmt.Sprintf("**%s**", formatTime(user.VoiceSeconds)),
+				Value:  fmt.Sprintf("**%s**", r.formatTimeForSlash(user.VoiceSeconds)),
 				Inline: false,
 			},
 		},
 	}
 
+	embeds := []*discordgo.MessageEmbed{embed}
 	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Embeds: []*discordgo.MessageEmbed{embed},
+		Embeds: &embeds,
 	})
 }
 
@@ -320,16 +322,18 @@ func (r *Ranking) handleSlashTransfer(s *discordgo.Session, i *discordgo.Interac
 
 	// Проверяем возможность перевода
 	if targetUser.ID == i.Member.User.ID {
+		content := "❌ Нельзя передать кредиты самому себе!"
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: "❌ Нельзя передать кредиты самому себе!",
+			Content: &content,
 		})
 		return
 	}
 
 	userRating := r.GetRating(i.Member.User.ID)
 	if userRating < amount {
+		content := fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d", userRating)
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: fmt.Sprintf("❌ Недостаточно кредитов! Твой баланс: %d", userRating),
+			Content: &content,
 		})
 		return
 	}
@@ -346,17 +350,17 @@ func (r *Ranking) handleSlashTransfer(s *discordgo.Session, i *discordgo.Interac
 	}
 
 	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content: msg,
+		Content: &msg,
 	})
 
 	// Логируем операцию
 	r.LogCreditOperation(s, fmt.Sprintf("<@%s> передает %d соцкредитов пользователю <@%s>%s", 
-		i.Member.User.ID, amount, targetUser.ID, formatReason(reason)))
+		i.Member.User.ID, amount, targetUser.ID, r.formatReasonForSlash(reason)))
 }
 
 // handleSlashInventory обработчик команды /inventory
 func (r *Ranking) handleSlashInventory(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Просто вызываем старый обработчик через фейковое сообщение
+	// Создаем фейковое сообщение и вызываем старый обработчик
 	fakeMsg := &discordgo.MessageCreate{
 		Message: &discordgo.Message{
 			ChannelID: i.ChannelID,
@@ -368,15 +372,13 @@ func (r *Ranking) handleSlashInventory(s *discordgo.Session, i *discordgo.Intera
 		},
 	}
 	
-	// Сохраняем оригинальный канал для ответа
-	originalChannelID := i.ChannelID
 	r.HandleInventoryCommand(s, fakeMsg)
 	
-	// Ответ уже отправлен через старый обработчик, так что просто логируем
+	// Ответ уже отправлен через старый обработчик
 	log.Printf("Slash command /inventory executed by %s", i.Member.User.Username)
 }
 
-// Аналогичные упрощенные обработчики для других команд...
+// handleSlashCaseInventory обработчик команды /case_inventory
 func (r *Ranking) handleSlashCaseInventory(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	fakeMsg := &discordgo.MessageCreate{
 		Message: &discordgo.Message{
@@ -391,6 +393,7 @@ func (r *Ranking) handleSlashCaseInventory(s *discordgo.Session, i *discordgo.In
 	r.HandleCaseInventoryCommand(s, fakeMsg)
 }
 
+// handleSlashBTC обработчик команды /btc
 func (r *Ranking) handleSlashBTC(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	fakeMsg := &discordgo.MessageCreate{
 		Message: &discordgo.Message{
@@ -405,6 +408,7 @@ func (r *Ranking) handleSlashBTC(s *discordgo.Session, i *discordgo.InteractionC
 	r.HandleBitcoinPriceCommand(s, fakeMsg)
 }
 
+// handleSlashPrices обработчик команды /prices
 func (r *Ranking) handleSlashPrices(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	fakeMsg := &discordgo.MessageCreate{
 		Message: &discordgo.Message{
@@ -419,6 +423,7 @@ func (r *Ranking) handleSlashPrices(s *discordgo.Session, i *discordgo.Interacti
 	r.HandlePriceStatsCommand(s, fakeMsg)
 }
 
+// handleSlashCaseBank обработчик команды /case_bank
 func (r *Ranking) handleSlashCaseBank(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	fakeMsg := &discordgo.MessageCreate{
 		Message: &discordgo.Message{
@@ -433,6 +438,7 @@ func (r *Ranking) handleSlashCaseBank(s *discordgo.Session, i *discordgo.Interac
 	r.HandleCaseBankCommand(s, fakeMsg)
 }
 
+// handleSlashDailyCase обработчик команды /daily_case
 func (r *Ranking) handleSlashDailyCase(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	fakeMsg := &discordgo.MessageCreate{
 		Message: &discordgo.Message{
@@ -447,6 +453,7 @@ func (r *Ranking) handleSlashDailyCase(s *discordgo.Session, i *discordgo.Intera
 	r.HandleDailyCaseCommand(s, fakeMsg)
 }
 
+// handleSlashChelp обработчик команды /chelp
 func (r *Ranking) handleSlashChelp(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	fakeMsg := &discordgo.MessageCreate{
 		Message: &discordgo.Message{
@@ -461,6 +468,7 @@ func (r *Ranking) handleSlashChelp(s *discordgo.Session, i *discordgo.Interactio
 	r.HandleChelpCommand(s, fakeMsg)
 }
 
+// handleSlashCaseHelp обработчик команды /case_help
 func (r *Ranking) handleSlashCaseHelp(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	fakeMsg := &discordgo.MessageCreate{
 		Message: &discordgo.Message{
@@ -475,10 +483,12 @@ func (r *Ranking) handleSlashCaseHelp(s *discordgo.Session, i *discordgo.Interac
 	r.HandleCaseHelpCommand(s, fakeMsg)
 }
 
+// handleSlashAdmin обработчик команды /admin
 func (r *Ranking) handleSlashAdmin(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if !r.IsAdmin(i.Member.User.ID) {
+		content := "❌ Только товарищи-админы могут раздавать плюшки! 🔒"
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content: "❌ Только товарищи-админы могут раздавать плюшки! 🔒",
+			Content: &content,
 		})
 		return
 	}
@@ -512,15 +522,16 @@ func (r *Ranking) handleSlashAdmin(s *discordgo.Session, i *discordgo.Interactio
 	r.HandleAdminCommand(s, fakeMsg, command)
 }
 
+// handleSlashUnknown обработчик неизвестной команды
 func (r *Ranking) handleSlashUnknown(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	content := "❌ Неизвестная команда! Используйте `/chelp` для списка команд."
 	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content: "❌ Неизвестная команда! Используйте `/chelp` для списка команд.",
+		Content: &content,
 	})
 }
 
-// Вспомогательная функция для формата времени
-func formatTime(seconds int) string {
-	// ... существующая реализация из commands.go
+// formatTimeForSlash вспомогательная функция для формата времени (чтобы избежать конфликта)
+func (r *Ranking) formatTimeForSlash(seconds int) string {
 	if seconds < 60 {
 		return fmt.Sprintf("%d секунд", seconds)
 	}
@@ -543,8 +554,8 @@ func formatTime(seconds int) string {
 	return fmt.Sprintf("%d часов %d минут %d секунд", hours, minutes, seconds)
 }
 
-// Вспомогательная функция для формата причины
-func formatReason(reason string) string {
+// formatReasonForSlash вспомогательная функция для формата причины (чтобы избежать конфликта)
+func (r *Ranking) formatReasonForSlash(reason string) string {
 	if reason == "" {
 		return ""
 	}
