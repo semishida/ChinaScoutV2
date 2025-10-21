@@ -22,10 +22,10 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 	dg.AddHandler(rank.TrackVoiceActivity)
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-    if i.Type == discordgo.InteractionApplicationCommand {
-        log.Printf("Slash command received: %s from %s", i.ApplicationCommandData().Name, i.Member.User.Username)
-        rank.HandleSlashCommand(s, i)
-    }
+		if i.Type == discordgo.InteractionApplicationCommand {
+			log.Printf("Slash command received: %s from %s", i.ApplicationCommandData().Name, i.Member.User.Username)
+			rank.HandleSlashCommand(s, i)
+		}
 	})
 	
 	for i := 0; i < 5; i++ {
@@ -41,8 +41,7 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
 	}
 
 	log.Println("Discord bot is running.")
-	return dg
-
+	return dg // ← ДОБАВЬ ЭТУ СТРОКУ
 }
 
 func SendFileToDiscord(dg *discordgo.Session, channelID, filePath, caption string) error {
