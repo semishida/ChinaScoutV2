@@ -295,6 +295,20 @@ func (r *Ranking) HandleSlashCommand(s *discordgo.Session, i *discordgo.Interact
 		r.handleSlashCaseHelp(s, i)
 	case "admin":
 		r.handleSlashAdmin(s, i)
+	case "cinema":
+        r.handleSlashCinema(s, i)
+    case "betcinema":
+        r.handleSlashBetCinema(s, i)
+    case "cinemalist":
+        r.handleSlashCinemaList(s, i)
+    case "admincinemalist":
+        r.handleSlashAdminCinemaList(s, i)
+    case "removelowest":
+        r.handleSlashRemoveLowest(s, i)
+    case "adjustcinema":
+        r.handleSlashAdjustCinema(s, i)
+    case "removecinema":
+        r.handleSlashRemoveCinema(s, i)	
 	default:
 		r.handleSlashUnknown(s, i)
 	}
@@ -700,6 +714,194 @@ func (r *Ranking) handleSlashUnknown(s *discordgo.Session, i *discordgo.Interact
 	})
 }
 
+func (r *Ranking) handleSlashCinema(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    data := i.ApplicationCommandData()
+    options := data.Options
+    
+    name := options[0].StringValue()
+    amount := int(options[1].IntValue())
+    
+    command := fmt.Sprintf("!cinema %s %d", name, amount)
+    
+    fakeMsg := &discordgo.MessageCreate{
+        Message: &discordgo.Message{
+            ChannelID: i.ChannelID,
+            Author: &discordgo.User{
+                ID:       i.Member.User.ID,
+                Username: i.Member.User.Username,
+            },
+            Content: command,
+        },
+    }
+    
+    r.HandleCinemaCommand(s, fakeMsg, command)
+    log.Printf("Slash command /cinema executed by %s", i.Member.User.Username)
+}
+
+// handleSlashBetCinema обработчик команды /betcinema
+func (r *Ranking) handleSlashBetCinema(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    data := i.ApplicationCommandData()
+    options := data.Options
+    
+    number := int(options[0].IntValue())
+    amount := int(options[1].IntValue())
+    
+    command := fmt.Sprintf("!betcinema %d %d", number, amount)
+    
+    fakeMsg := &discordgo.MessageCreate{
+        Message: &discordgo.Message{
+            ChannelID: i.ChannelID,
+            Author: &discordgo.User{
+                ID:       i.Member.User.ID,
+                Username: i.Member.User.Username,
+            },
+            Content: command,
+        },
+    }
+    
+    r.HandleBetCinemaCommand(s, fakeMsg, command)
+    log.Printf("Slash command /betcinema executed by %s", i.Member.User.Username)
+}
+
+// handleSlashCinemaList обработчик команды /cinemalist
+func (r *Ranking) handleSlashCinemaList(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    fakeMsg := &discordgo.MessageCreate{
+        Message: &discordgo.Message{
+            ChannelID: i.ChannelID,
+            Author: &discordgo.User{
+                ID:       i.Member.User.ID,
+                Username: i.Member.User.Username,
+            },
+            Content: "!cinemalist",
+        },
+    }
+    
+    r.HandleCinemaListCommand(s, fakeMsg)
+    log.Printf("Slash command /cinemalist executed by %s", i.Member.User.Username)
+}
+
+// handleSlashAdminCinemaList обработчик команды /admincinemalist
+func (r *Ranking) handleSlashAdminCinemaList(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    if !r.IsAdmin(i.Member.User.ID) {
+        content := "❌ Только админы могут просматривать детальный список"
+        s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+            Content: &content,
+        })
+        return
+    }
+
+    fakeMsg := &discordgo.MessageCreate{
+        Message: &discordgo.Message{
+            ChannelID: i.ChannelID,
+            Author: &discordgo.User{
+                ID:       i.Member.User.ID,
+                Username: i.Member.User.Username,
+            },
+            Content: "!admincinemalist",
+        },
+    }
+    
+    r.HandleAdminCinemaListCommand(s, fakeMsg)
+    log.Printf("Slash command /admincinemalist executed by %s", i.Member.User.Username)
+}
+
+// handleSlashRemoveLowest обработчик команды /removelowest
+func (r *Ranking) handleSlashRemoveLowest(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    if !r.IsAdmin(i.Member.User.ID) {
+        content := "❌ Только админы могут удалять варианты"
+        s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+            Content: &content,
+        })
+        return
+    }
+
+    data := i.ApplicationCommandData()
+    options := data.Options
+    
+    count := int(options[0].IntValue())
+    
+    command := fmt.Sprintf("!removelowest %d", count)
+    
+    fakeMsg := &discordgo.MessageCreate{
+        Message: &discordgo.Message{
+            ChannelID: i.ChannelID,
+            Author: &discordgo.User{
+                ID:       i.Member.User.ID,
+                Username: i.Member.User.Username,
+            },
+            Content: command,
+        },
+    }
+    
+    r.HandleRemoveLowestCommand(s, fakeMsg, command)
+    log.Printf("Slash command /removelowest executed by %s", i.Member.User.Username)
+}
+
+// handleSlashAdjustCinema обработчик команды /adjustcinema
+func (r *Ranking) handleSlashAdjustCinema(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    if !r.IsAdmin(i.Member.User.ID) {
+        content := "❌ Только админы могут корректировать варианты"
+        s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+            Content: &content,
+        })
+        return
+    }
+
+    data := i.ApplicationCommandData()
+    options := data.Options
+    
+    number := int(options[0].IntValue())
+    adjustment := options[1].IntValue()
+    
+    command := fmt.Sprintf("!adjustcinema %d %d", number, adjustment)
+    
+    fakeMsg := &discordgo.MessageCreate{
+        Message: &discordgo.Message{
+            ChannelID: i.ChannelID,
+            Author: &discordgo.User{
+                ID:       i.Member.User.ID,
+                Username: i.Member.User.Username,
+            },
+            Content: command,
+        },
+    }
+    
+    r.HandleAdjustCinemaCommand(s, fakeMsg, command)
+    log.Printf("Slash command /adjustcinema executed by %s", i.Member.User.Username)
+}
+
+// handleSlashRemoveCinema обработчик команды /removecinema
+func (r *Ranking) handleSlashRemoveCinema(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    if !r.IsAdmin(i.Member.User.ID) {
+        content := "❌ Только админы могут удалять фильмы"
+        s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+            Content: &content,
+        })
+        return
+    }
+
+    data := i.ApplicationCommandData()
+    options := data.Options
+    
+    number := int(options[0].IntValue())
+    
+    command := fmt.Sprintf("!removecinema %d", number)
+    
+    fakeMsg := &discordgo.MessageCreate{
+        Message: &discordgo.Message{
+            ChannelID: i.ChannelID,
+            Author: &discordgo.User{
+                ID:       i.Member.User.ID,
+                Username: i.Member.User.Username,
+            },
+            Content: command,
+        },
+    }
+    
+    r.HandleRemoveCinemaCommand(s, fakeMsg, command)
+    log.Printf("Slash command /removecinema executed by %s", i.Member.User.Username)
+}
+
 // formatTimeForSlash вспомогательная функция для формата времени (чтобы избежать конфликта)
 func (r *Ranking) formatTimeForSlash(seconds int) string {
 	if seconds < 60 {
@@ -723,6 +925,8 @@ func (r *Ranking) formatTimeForSlash(seconds int) string {
 	}
 	return fmt.Sprintf("%d часов %d минут %d секунд", hours, minutes, seconds)
 }
+
+
 
 // formatReasonForSlash вспомогательная функция для формата причины (чтобы избежать конфликта)
 func (r *Ranking) formatReasonForSlash(reason string) string {
