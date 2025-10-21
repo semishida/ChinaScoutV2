@@ -158,7 +158,7 @@ func (r *Ranking) RegisterSlashCommands(s *discordgo.Session, guildID string) er
 
 // HandleSlashCommand обрабатывает все слэш-команды
 func (r *Ranking) HandleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	data := i.ApplicationCommandData()
+    data := i.ApplicationCommandData()
     
     // Сначала проверяем, существует ли команда
     switch data.Name {
@@ -185,39 +185,39 @@ func (r *Ranking) HandleSlashCommand(s *discordgo.Session, i *discordgo.Interact
         return
     }
 
-	switch data.Name {
-	case "china":
-		r.handleSlashChina(s, i)
-	case "top":
-		r.handleSlashTop(s, i)
-	case "stats":
-		r.handleSlashStats(s, i)
-	case "transfer":
-		r.handleSlashTransfer(s, i)
-	case "inventory":
-		r.handleSlashInventory(s, i)
-	case "case_inventory":
-		r.handleSlashCaseInventory(s, i)
-	case "btc":
-		r.handleSlashBTC(s, i)
-	case "prices":
-		r.handleSlashPrices(s, i)
-	case "case_bank":
-		r.handleSlashCaseBank(s, i)
-	case "daily_case":
-		r.handleSlashDailyCase(s, i)
-	case "buy_case_bank":
-    	r.handleSlashBuyCaseBank(s, i)
-	case "chelp":
-		r.handleSlashChelp(s, i)
-	case "case_help":
-		r.handleSlashCaseHelp(s, i)
-	case "admin":
-		r.handleSlashAdmin(s, i)
-	default:
-		r.handleSlashUnknown(s, i)
-	}
+    // Обрабатываем команду
+    switch data.Name {
+    case "china":
+        r.handleSlashChina(s, i)
+    case "top":
+        r.handleSlashTop(s, i)
+    case "stats":
+        r.handleSlashStats(s, i)
+    case "transfer":
+        r.handleSlashTransfer(s, i)
+    case "inventory":
+        r.handleSlashInventory(s, i)
+    case "case_inventory":
+        r.handleSlashCaseInventory(s, i)
+    case "btc":
+        r.handleSlashBTC(s, i)
+    case "prices":
+        r.handleSlashPrices(s, i)
+    case "case_bank":
+        r.handleSlashCaseBank(s, i)
+    case "daily_case":
+        r.handleSlashDailyCase(s, i)
+    case "chelp":
+        r.handleSlashChelp(s, i)
+    case "case_help":
+        r.handleSlashCaseHelp(s, i)
+    case "admin":
+        r.handleSlashAdmin(s, i)
+    case "buy_case_bank": // ← добавил обработчик
+        r.handleSlashBuyCaseBank(s, i)
+    }
 }
+
 
 // handleSlashChina обработчик команды /china
 func (r *Ranking) handleSlashChina(s *discordgo.Session, i *discordgo.InteractionCreate) {
