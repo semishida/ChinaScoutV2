@@ -42,6 +42,7 @@ func SetupDiscord(token, floodChannelID, relayChannelID string, rank *ranking.Ra
         rank.HandleSlashCommand(s, i)
     }
 	})
+	return dg
 }
 
 func SendFileToDiscord(dg *discordgo.Session, channelID, filePath, caption string) error {
