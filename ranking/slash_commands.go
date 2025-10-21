@@ -29,6 +29,104 @@ func (r *Ranking) RegisterSlashCommands(s *discordgo.Session, guildID string) er
 			Description: "Топ-5 пользователей по кредитам",
 		},
 		{
+			Name:        "cinema",
+			Description: "Предложить новый фильм для киноаукциона",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "название",
+					Description: "Название фильма",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "сумма",
+					Description: "Сумма ставки",
+					Required:    true,
+					MinValue:    &[]float64{1}[0],
+					MaxValue:    1000000,
+				},
+			},
+		},
+		{
+			Name:        "betcinema",
+			Description: "Сделать ставку на существующий фильм",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "номер",
+					Description: "Номер фильма из списка",
+					Required:    true,
+					MinValue:    &[]float64{1}[0],
+					MaxValue:    100,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "сумма",
+					Description: "Сумма ставки",
+					Required:    true,
+					MinValue:    &[]float64{1}[0],
+					MaxValue:    1000000,
+				},
+			},
+		},
+		{
+			Name:        "cinemalist",
+			Description: "Показать список фильмов на аукционе",
+		},
+		{
+			Name:        "admincinemalist",
+			Description: "Детальный список фильмов (только для админов)",
+		},
+		{
+			Name:        "removelowest",
+			Description: "Удалить фильмы с наименьшими ставками (админы)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "количество",
+					Description: "Количество фильмов для удаления",
+					Required:    true,
+					MinValue:    &[]float64{1}[0],
+					MaxValue:    100,
+				},
+			},
+		},
+		{
+			Name:        "adjustcinema",
+			Description: "Корректировать сумму фильма (админы)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "номер",
+					Description: "Номер фильма для корректировки",
+					Required:    true,
+					MinValue:    &[]float64{1}[0],
+					MaxValue:    100,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "корректировка",
+					Description: "Сумма корректировки (+/-)",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "removecinema",
+			Description: "Удалить фильм без возврата кредитов (админы)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "номер",
+					Description: "Номер фильма для удаления",
+					Required:    true,
+					MinValue:    &[]float64{1}[0],
+					MaxValue:    100,
+				},
+			},
+		},
+		{
 			Name:        "stats",
 			Description: "Статистика пользователя",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -73,6 +171,23 @@ func (r *Ranking) RegisterSlashCommands(s *discordgo.Session, guildID string) er
 		{
 			Name:        "case_inventory",
 			Description: "Показать инвентарь кейсов",
+		},
+		{
+   			Name:        "blackjack",
+    		Description: "Начать игру в блэкджек",
+		},
+
+		{
+    		Name:        "endblackjack",
+    		Description: "Завершить игру в блэкджек (админы)",
+    		Options: []*discordgo.ApplicationCommandOption{
+        		{
+            		Type:        discordgo.ApplicationCommandOptionUser,
+            		Name:        "user",
+            		Description: "Пользователь, чью игру завершить",
+            		Required:    true,
+        		},
+    		},
 		},
 		{
 			Name:        "btc",
@@ -158,6 +273,10 @@ func (r *Ranking) HandleSlashCommand(s *discordgo.Session, i *discordgo.Interact
 		r.handleSlashStats(s, i)
 	case "transfer":
 		r.handleSlashTransfer(s, i)
+	case "blackjack":
+        r.handleSlashBlackjack(s, i)
+    case "endblackjack":
+        r.handleSlashEndBlackjack(s, i)
 	case "inventory":
 		r.handleSlashInventory(s, i)
 	case "case_inventory":
@@ -180,6 +299,7 @@ func (r *Ranking) HandleSlashCommand(s *discordgo.Session, i *discordgo.Interact
 		r.handleSlashUnknown(s, i)
 	}
 }
+
 
 // handleSlashChina обработчик команды /china
 func (r *Ranking) handleSlashChina(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -224,6 +344,60 @@ func (r *Ranking) handleSlashTop(s *discordgo.Session, i *discordgo.InteractionC
 	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content: &response,
 	})
+}
+// handleSlashBlackjack обработчик команды /blackjack
+func (r *Ranking) handleSlashBlackjack(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    // Создаем фейковое сообщение для старого обработчика
+    fakeMsg := &discordgo.MessageCreate{
+        Message: &discordgo.Message{
+            ChannelID: i.ChannelID,
+            Author: &discordgo.User{
+                ID:       i.Member.User.ID,
+                Username: i.Member.User.Username,
+            },
+            Content: "!blackjack",
+        },
+    }
+    
+    // Вызываем старый обработчик
+    r.StartBlackjackGame(s, fakeMsg)
+    
+    log.Printf("Slash command /blackjack executed by %s", i.Member.User.Username)
+}
+
+// handleSlashEndBlackjack обработчик команды /endblackjack
+func (r *Ranking) handleSlashEndBlackjack(s *discordgo.Session, i *discordgo.InteractionCreate) {
+    if !r.IsAdmin(i.Member.User.ID) {
+        content := "❌ Только админы могут завершать игры! 🔒"
+        s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+            Content: &content,
+        })
+        return
+    }
+
+    data := i.ApplicationCommandData()
+    options := data.Options
+    
+    targetUser := options[0].UserValue(s)
+    
+    // Создаем фейковую команду для старого обработчика
+    command := fmt.Sprintf("!endblackjack <@%s>", targetUser.ID)
+    
+    fakeMsg := &discordgo.MessageCreate{
+        Message: &discordgo.Message{
+            ChannelID: i.ChannelID,
+            Author: &discordgo.User{
+                ID:       i.Member.User.ID,
+                Username: i.Member.User.Username,
+            },
+            Content: command,
+        },
+    }
+    
+    // Вызываем старый обработчик
+    r.HandleEndBlackjackCommand(s, fakeMsg, command)
+    
+    log.Printf("Slash command /endblackjack executed by %s", i.Member.User.Username)
 }
 
 // handleSlashStats обработчик команды /stats
